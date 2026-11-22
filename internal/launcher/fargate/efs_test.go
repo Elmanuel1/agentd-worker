@@ -6,6 +6,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/efs"
 	efstypes "github.com/aws/aws-sdk-go-v2/service/efs/types"
 )
@@ -44,5 +45,23 @@ func TestAccessPointWaitsUntilAvailable(t *testing.T) {
 				t.Errorf("creating %d reads: got %q, %v after %s", tc.left, id, err, time.Since(start))
 			}
 		})
+	}
+}
+
+// TestAddressOfAStoppedTask holds that a launched task which stopped on its own, which
+// DescribeTasks still returns, does not count as running.
+func TestAddressOfAStoppedTask(t *testing.T) {
+	f := newFake()
+	l := New(f, f, f, cfg)
+	if err := l.Launch(t.Context(), "sesn_1", "n1"); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	for _, task := range f.tasks {
+		task.DesiredStatus, task.LastStatus = aws.String("STOPPED"), aws.String("STOPPED")
+	}
+	f.mu.Unlock()
+	if _, running, err := l.Address(t.Context(), "sesn_1"); running || err != nil {
+		t.Errorf("a stopped task: running %v, %v", running, err)
 	}
 }

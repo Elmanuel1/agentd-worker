@@ -59,6 +59,8 @@ func (l *Launcher) createResolver(ctx context.Context, name string) error {
 		Name: name,
 		Config: &container.Config{
 			Image: l.cfg.ToolImage, Cmd: []string{roleResolver}, User: "65532:65532",
+			// The Go runtime does not read the cgroup's limit; this keeps the heap under it.
+			Env:    []string{"GOMEMLIMIT=48MiB"},
 			Labels: map[string]string{labelRole: roleResolver},
 		},
 		HostConfig: &container.HostConfig{

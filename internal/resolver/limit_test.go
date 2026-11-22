@@ -15,7 +15,7 @@ func TestLimitDropsWhenFull(t *testing.T) {
 	if !l.take() {
 		t.Fatal("the first query found no slot")
 	}
-	if l.take() || l.take() {
+	if second, third := l.take(), l.take(); second || third {
 		t.Error("a query past the bound took a slot")
 	}
 	if n := strings.Count(logs.String(), "dropping queries"); n != 1 {

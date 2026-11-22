@@ -40,6 +40,7 @@ drops the rest, and is replaced when `AGENTD_TOOL_IMAGE` changes.
 **Known gap: DNS.** The relay forwards any name to the engine's resolver, and a lookup can carry
 data in the name it asks for. Closing it takes a relay that answers only for agentd's, the
 controller's and the proxy's names.
+
 Anthropic's worker script refuses to run where the metadata address answers, so the host rejects
 it for containers: `iptables -I DOCKER-USER -d 169.254.0.0/16 -j REJECT`.
 
