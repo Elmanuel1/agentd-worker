@@ -22,7 +22,7 @@ image:
 runtimeClass:
   name: gvisor
   # The chart's RuntimeClass pins sandboxes to nodes labelled and tainted
-  # cma.anthropic.com/sandbox-node=true, which nodepool.yaml gives our runsc nodes.
+  # cma.anthropic.com/sandbox-node=true, which both node pools give our runsc nodes.
   create: true
 sandbox:
   idleTimeout: 30m

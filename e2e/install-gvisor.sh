@@ -1,6 +1,6 @@
 #!/bin/sh
 # Installs gVisor's runsc on a CI runner and registers it with Docker as "runsc", pinned to
-# release 20261116 with the sha512 read from its release on 2026-11-22. Bump with nodepool.yaml.
+# release 20261116 with the sha512 read from its release on 2026-11-22. Bump with deploy/eks/nodeclass.yaml.
 set -eu
 release=20261116
 case "$(uname -m)" in

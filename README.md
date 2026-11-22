@@ -27,8 +27,8 @@ agentd-worker scale
 
 ## Quickstart: EKS
 
-Install Anthropic's chart with `deploy/eks/values.yaml`, the egress policies, the Karpenter
-NodePool and the reaper. See [docs/eks.md](docs/eks.md).
+Install Anthropic's chart with `deploy/eks/values.yaml`, the egress policies, the Karpenter node
+class with an on-demand or a spot node pool, and the reaper. See [docs/eks.md](docs/eks.md).
 
 ## Quickstart: ECS Fargate
 

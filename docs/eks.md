@@ -3,9 +3,18 @@
 On Kubernetes, sandboxes run under Anthropic's `cma-sandboxes` chart and its dispatcher, unchanged,
 pointed at agentd. agentd-worker adds the sandbox image, the egress rules, the nodes and the reaper.
 
-1. **Cluster.** EKS on EC2 with Cilium as the CNI and Karpenter. Apply `deploy/eks/nodepool.yaml`:
-   Graviton nodes with gVisor's `runsc`, labelled and tainted as the chart's `gvisor` RuntimeClass
-   expects. EKS on Fargate cannot run Cilium or mount the chart's EBS volumes.
+1. **Cluster.** EKS on EC2 with Cilium as the CNI and Karpenter. Apply `deploy/eks/nodeclass.yaml`,
+   Graviton nodes with gVisor's `runsc`, and one of the two node pools, each labelled and tainted as
+   the chart's `gvisor` RuntimeClass expects. EKS on Fargate cannot run Cilium or mount the chart's
+   EBS volumes.
+   - `nodepool-on-demand.yaml`: on-demand nodes, removed only once empty. Karpenter never stops a
+     running sandbox, and the pool still scales to zero.
+   - `nodepool-spot.yaml`: spot nodes first, consolidated when under-used. It costs less, but a spot
+     reclaim (two minutes' notice), a consolidation or a drift kills the sandboxes on that node, and
+     the reaper answers their open tool calls with an error. Its budget limits consolidation and
+     drift to one node in ten at a time; a spot reclaim ignores it.
+
+   Both pools are named `agentd-sandboxes`, so applying the other one switches the cluster over.
 2. **Images.** Build `image/sandbox` with the proxy's address and CA for our cloud
    (`--build-arg AGENTD_PROXY_URL=... --build-arg AGENTD_CLOUD=1 --build-context proxy-ca=<dir>`),
    or without them for a self-hosted environment. Push it to your registry as `agentd-sandbox`, and

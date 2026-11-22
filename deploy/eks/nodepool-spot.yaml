@@ -1,0 +1,42 @@
+# Karpenter nodes for sandboxes, on spot first and on demand when spot has none, consolidated when
+# under-used. Cheaper than nodepool-on-demand.yaml, but a spot reclaim, a consolidation or a drift
+# kills the sandboxes on that node mid-turn; the reaper then answers their open tool calls with an
+# error. The budget limits consolidation and drift to one node in ten at a time; a spot reclaim and
+# expiry ignore it. Labelled and tainted as the chart's RuntimeClass expects; the cluster's CNI is
+# Cilium, so cilium-egress.yaml applies.
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: agentd-sandboxes
+spec:
+  template:
+    metadata:
+      labels:
+        cma.anthropic.com/sandbox-node: "true"
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: agentd-sandboxes
+      taints:
+        - key: cma.anthropic.com/sandbox-node
+          value: "true"
+          effect: NoSchedule
+      expireAfter: 720h
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["arm64"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot", "on-demand"]
+        - key: karpenter.k8s.aws/instance-category
+          operator: In
+          values: ["c", "m", "r"]
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 5m
+    budgets:
+      - nodes: "10%"
+  limits:
+    cpu: "2000"
