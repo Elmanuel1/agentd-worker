@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"reflect"
 	"slices"
 	"strconv"
 	"testing"
@@ -141,6 +142,33 @@ func TestRunReadsEveryPage(t *testing.T) {
 			t.Errorf("read %d pages after one interval, want 6", f.pages)
 		}
 	})
+}
+
+// TestStatesOnlyStepForward holds the reaper's order (CV-3): no state converts to another, and
+// each state's only step is the next one's.
+func TestStatesOnlyStepForward(t *testing.T) {
+	cases := []struct {
+		state   reflect.Type
+		methods []string
+	}{
+		{reflect.TypeFor[Stale](), []string{"Stop"}},
+		{reflect.TypeFor[Stopped](), []string{"Answer"}},
+		{reflect.TypeFor[Answered](), []string{"Calls", "Reaped"}},
+	}
+	for _, c := range cases {
+		var got []string
+		for m := range c.state.Methods() {
+			got = append(got, m.Name)
+		}
+		if !slices.Equal(got, c.methods) {
+			t.Errorf("%s has methods %v, want %v", c.state.Name(), got, c.methods)
+		}
+		for _, other := range cases {
+			if other.state != c.state && c.state.ConvertibleTo(other.state) {
+				t.Errorf("%s converts to %s", c.state.Name(), other.state.Name())
+			}
+		}
+	}
 }
 
 func TestOwed(t *testing.T) {

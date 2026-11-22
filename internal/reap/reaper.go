@@ -110,7 +110,7 @@ func (r *Reaper) reap(ctx context.Context, now time.Time, it Item) {
 		return
 	}
 	delete(r.retry, it.Session)
-	if answered.Calls() > 0 || it.State != StateStopped {
+	if answered.Calls() > 0 || answered.Reaped() {
 		r.results.Add(ctx, int64(answered.Calls()))
 		r.log.Info("answered a dead worker's item", "item_id", it.Session, "last_heartbeat", it.Beat, "calls_answered", answered.Calls())
 	}

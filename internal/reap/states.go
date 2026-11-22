@@ -16,12 +16,14 @@ func (s Stale) Stop(ctx context.Context, items Items) (Stopped, error) {
 	if err := items.Stop(ctx, s.item.Session); err != nil {
 		return Stopped{}, fmt.Errorf("stopping item %s: %w", s.item.Session, err)
 	}
-	return Stopped{item: s.item}, nil
+	return Stopped{item: s.item, reaped: true}, nil
 }
 
-// Stopped is an item no worker holds, whose owed calls may still be unanswered.
+// Stopped is an item no worker holds, whose owed calls may still be unanswered. reaped is true
+// when this pass stopped it.
 type Stopped struct {
-	item Item
+	item   Item
+	reaped bool
 }
 
 // Answer posts an error result for each tool call the session still owes.
@@ -36,17 +38,20 @@ func (s Stopped) Answer(ctx context.Context, events Events) (Answered, error) {
 			return Answered{}, fmt.Errorf("answering %d calls of %s: %w", len(calls), s.item.Session, err)
 		}
 	}
-	return Answered{item: s.item, calls: len(calls)}, nil
+	return Answered{of: s, calls: len(calls)}, nil
 }
 
 // Answered is a stopped item whose session owes nothing.
 type Answered struct {
-	item  Item
+	of    Stopped
 	calls int
 }
 
 // Calls is the number of error results posted.
 func (a Answered) Calls() int { return a.calls }
+
+// Reaped reports whether this pass stopped the item.
+func (a Answered) Reaped() bool { return a.of.reaped }
 
 // owed returns the tool calls with no result after them, in order. A session that ended owes nothing.
 func owed(events []Event) []string {

@@ -75,13 +75,13 @@ func (c Collected) Ack(ctx context.Context, queue Queue) (Acked, error) {
 	if err := queue.Ack(ackCtx, c.session); err != nil {
 		return Acked{}, fmt.Errorf("acking session %s: %w", c.session, err)
 	}
-	return Acked{session: c.session}, nil
+	return Acked{of: c}, nil
 }
 
 // Acked is an item handed over and confirmed. Nothing follows it.
 type Acked struct {
-	session ids.SessionID
+	of Collected
 }
 
 // Session is the acked item's session.
-func (a Acked) Session() ids.SessionID { return a.session }
+func (a Acked) Session() ids.SessionID { return a.of.session }

@@ -35,6 +35,11 @@ func TestStatesOnlyStepForward(t *testing.T) {
 		if c.state.NumField() > 0 && c.state.Field(0).IsExported() {
 			t.Errorf("%s exports its fields", c.state.Name())
 		}
+		for _, other := range cases {
+			if other.state != c.state && c.state.ConvertibleTo(other.state) {
+				t.Errorf("%s converts to %s, skipping the steps between", c.state.Name(), other.state.Name())
+			}
+		}
 	}
 }
 
