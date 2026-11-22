@@ -139,26 +139,26 @@ func TestShutdown(t *testing.T) {
 	}
 }
 
-// TestReleaseGoneSessions holds SC-9: only a session agentd answers 404 for is released.
-func TestReleaseGoneSessions(t *testing.T) {
+// TestRedeliveryAfterAFailedAck acks the item its running sandbox already holds, and stops nothing.
+func TestRedeliveryAfterAFailedAck(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		sessions := fakeSessions{"sesn_gone": errGone, "sesn_live": nil, "sesn_err": context.DeadlineExceeded}
-		r := newRig(t, cfg, sessions)
-		for s := range sessions {
-			r.backend.running[s] = false
-		}
+		r := newRig(t, cfg, nil)
+		r.queue.failAcks = 1
 		ctx, cancel := context.WithCancel(t.Context())
-		go r.ctrl.Release(ctx)
-		time.Sleep(cfg.ReleaseInterval - time.Second)
-		synctest.Wait()
-		if _, _, released := r.backend.calls(); len(released) != 0 {
-			t.Fatalf("released %v before the interval", released)
-		}
-		time.Sleep(2 * time.Second)
-		synctest.Wait()
+		done := make(chan error)
+		go func() { done <- r.ctrl.Run(ctx) }()
+		r.queue.items <- item{"sesn_1", ids.NewSecret("s")}
+		time.Sleep(time.Second)
+		r.collect("sesn_1")
+		time.Sleep(10 * time.Second)
+		r.queue.items <- item{"sesn_1", ids.NewSecret("s")}
+		time.Sleep(10 * time.Second)
 		cancel()
-		if _, _, released := r.backend.calls(); !slices.Equal(released, []ids.SessionID{"sesn_gone"}) {
-			t.Errorf("released %v", released)
+		<-done
+		launched, stopped, _ := r.backend.calls()
+		_, acked := r.queue.state()
+		if len(launched) != 1 || len(stopped) != 0 || !slices.Equal(acked, []ids.WorkID{workOf("sesn_1")}) {
+			t.Errorf("launched %v, stopped %v, acked %v", launched, stopped, acked)
 		}
 	})
 }

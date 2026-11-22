@@ -8,19 +8,23 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
-	"github.com/aws/aws-sdk-go-v2/service/efs"
 
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
 )
 
-// tasks returns the cluster's tasks that should run, the session's alone when session is set.
-func (l *Launcher) tasks(ctx context.Context, session ids.SessionID) ([]ecstypes.Task, error) {
+// listTasks returns the cluster's tasks that should run, the session's alone when session is set,
+// or the one task known when known is set, which spends no ListTasks call.
+func (l *Launcher) listTasks(ctx context.Context, session ids.SessionID, known string) ([]ecstypes.Task, error) {
+	// ListTasks takes startedBy only as its sole filter; the desired status defaults to RUNNING.
 	in := &ecs.ListTasksInput{Cluster: aws.String(l.cfg.Cluster), DesiredStatus: ecstypes.DesiredStatusRunning}
 	if session != "" {
-		in.StartedBy = aws.String(string(session))
+		in = &ecs.ListTasksInput{Cluster: aws.String(l.cfg.Cluster), StartedBy: aws.String(string(session))}
 	}
 	var arns []string
-	for p := ecs.NewListTasksPaginator(l.ecs, in); p.HasMorePages(); {
+	if known != "" {
+		arns = []string{known}
+	}
+	for p := ecs.NewListTasksPaginator(l.ecs, in); known == "" && p.HasMorePages(); {
 		page, err := p.NextPage(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("listing tasks: %w", err)
@@ -36,27 +40,4 @@ func (l *Launcher) tasks(ctx context.Context, session ids.SessionID) ([]ecstypes
 		tasks = append(tasks, out.Tasks...)
 	}
 	return tasks, nil
-}
-
-// accessPoints returns the file system's access points by the session each is tagged with.
-func (l *Launcher) accessPoints(ctx context.Context) (map[ids.SessionID][]string, error) {
-	out := map[ids.SessionID][]string{}
-	in := &efs.DescribeAccessPointsInput{FileSystemId: aws.String(l.cfg.FileSystemID)}
-	for p := efs.NewDescribeAccessPointsPaginator(l.efs, in); p.HasMorePages(); {
-		page, err := p.NextPage(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("listing access points: %w", err)
-		}
-		for _, ap := range page.AccessPoints {
-			for _, tag := range ap.Tags {
-				if aws.ToString(tag.Key) != tagSession {
-					continue
-				}
-				if s, err := ids.ParseSessionID(aws.ToString(tag.Value)); err == nil {
-					out[s] = append(out[s], aws.ToString(ap.AccessPointId))
-				}
-			}
-		}
-	}
-	return out, nil
 }

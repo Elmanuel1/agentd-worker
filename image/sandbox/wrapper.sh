@@ -45,21 +45,27 @@ if [ -n "${AGENTD_PROXY_URL:-}" ]; then
 	fi
 fi
 
-# Files mount under /mnt/session or /workspace; another path is left out, as no tool may write it.
+# As live's cloud mounts them: a file's mount_path is under /mnt/session/uploads ("/data.csv" lands
+# at /mnt/session/uploads/data.csv, no path at /mnt/session/uploads/<file id>), read-only. A failed
+# read fails the sandbox rather than run the session without its files.
+UPLOADS="${AGENTD_UPLOADS_DIR:-/mnt/session/uploads}"
 stage_files() {
 	session="$(cat "$WORK_ITEM_DIR/session_id")"
 	token="$(payload | jq -r '.sessions_token')"
 	auth="Authorization: Bearer $token"
-	curl -sf -H "$auth" -H 'anthropic-beta: managed-agents-2026-04-01' "$base_url/v1/sessions/$session" |
-		jq -r '.resources[]? | select(.type == "file") | "\(.file_id)\t\(.mount_path)"' |
-		while IFS="$(printf '\t')" read -r file_id mount_path; do
-			case "$mount_path" in
-			/mnt/session/* | /workspace/*) ;;
-			*) echo "not staging $file_id at $mount_path: outside /mnt/session and /workspace" >&2; continue ;;
-			esac
-			mkdir -p "$(dirname "$mount_path")"
-			curl -sf -H "$auth" -H 'anthropic-beta: files-api-2025-04-14' -o "$mount_path" "$base_url/v1/files/$file_id/content"
-		done
+	listing="$(mktemp)"
+	curl -sf -H "$auth" -H 'anthropic-beta: managed-agents-2026-04-01' -o "$listing" "$base_url/v1/sessions/$session"
+	jq -r '.resources[]? | select(.type == "file") | "\(.file_id)\t\(.mount_path // "")"' "$listing" > "$listing.files"
+	while IFS="$(printf '\t')" read -r file_id mount_path; do
+		rel="${mount_path#/mnt/session/uploads}"
+		rel="${rel#/}"
+		case "/$rel/" in */../*) echo "not staging $file_id: $mount_path leaves the uploads directory" >&2; exit 1 ;; esac
+		target="$UPLOADS/${rel:-$file_id}"
+		mkdir -p "$(dirname "$target")"
+		curl -sf -H "$auth" -H 'anthropic-beta: files-api-2025-04-14' -o "$target" "$base_url/v1/files/$file_id/content"
+		chmod 0444 "$target"
+	done < "$listing.files"
+	rm -f "$listing" "$listing.files"
 }
 if [ -n "${AGENTD_CLOUD:-}" ]; then
 	stage_files

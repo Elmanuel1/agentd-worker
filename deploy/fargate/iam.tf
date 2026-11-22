@@ -78,6 +78,17 @@ data "aws_iam_policy_document" "controller" {
     actions   = ["ecs:ListTasks", "ecs:RegisterTaskDefinition", "ecs:DeregisterTaskDefinition", "ecs:DeleteTaskDefinitions", "ecs:DescribeTaskDefinition", "ecs:ListTaskDefinitions"]
     resources = ["*"]
   }
+  # Tags on RegisterTaskDefinition are authorised as ecs:TagResource.
+  statement {
+    sid       = "TagRevisions"
+    actions   = ["ecs:TagResource"]
+    resources = ["arn:aws:ecs:${local.region}:${local.account}:task-definition/agentd-*"]
+    condition {
+      test     = "StringEquals"
+      variable = "ecs:CreateAction"
+      values   = ["RegisterTaskDefinition"]
+    }
+  }
   statement {
     sid       = "PassRoles"
     actions   = ["iam:PassRole"]

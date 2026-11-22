@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -36,6 +37,7 @@ func runScale(ctx context.Context, log *slog.Logger) error {
 		HandoffWait:     e.seconds("AGENTD_HANDOFF_WAIT_SECONDS", 120),
 		MaxSandboxes:    e.number("AGENTD_MAX_SANDBOXES", 100),
 		ReleaseInterval: e.seconds("AGENTD_RELEASE_INTERVAL_SECONDS", 600),
+		Retention:       time.Duration(e.days("AGENTD_RETENTION_DAYS")) * 24 * time.Hour,
 	}
 	reapCfg := reapConfig(&e)
 	addr := e.str("AGENTD_HANDOFF_ADDR", ":8443")
@@ -64,7 +66,11 @@ func runScale(ctx context.Context, log *slog.Logger) error {
 	}
 	defer be.Close()
 
-	client := agentd.New(baseURL, envID, key.Reveal(), requestTimeout)
+	host, err := os.Hostname()
+	if err != nil {
+		return err
+	}
+	client := agentd.New(baseURL, envID, key.Reveal(), requestTimeout).WithWorker(host)
 	store := handoff.NewStore(be)
 	ctrl, err := dispatch.New(cfg, client, client, be, be, store, meter, log)
 	if err != nil {

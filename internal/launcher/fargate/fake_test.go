@@ -56,6 +56,12 @@ func (f *fakeAWS) StopTask(_ context.Context, in *ecs.StopTaskInput, _ ...func(*
 func (f *fakeAWS) ListTasks(_ context.Context, in *ecs.ListTasksInput, _ ...func(*ecs.Options)) (*ecs.ListTasksOutput, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if in.StartedBy != nil && in.DesiredStatus != "" {
+		return nil, &ecstypes.InvalidParameterException{Message: aws.String("startedBy must be the only filter")}
+	}
+	if in.DesiredStatus == "" {
+		in.DesiredStatus = ecstypes.DesiredStatusRunning
+	}
 	var arns []string
 	for arn, t := range f.tasks {
 		if aws.ToString(t.DesiredStatus) == string(in.DesiredStatus) && (in.StartedBy == nil || aws.ToString(in.StartedBy) == aws.ToString(t.StartedBy)) {
@@ -82,20 +88,14 @@ func (f *fakeAWS) RegisterTaskDefinition(_ context.Context, in *ecs.RegisterTask
 	arn := fmt.Sprintf("arn:aws:ecs:r:1:task-definition/%s:%d", aws.ToString(in.Family), f.n)
 	f.defs[arn] = "ACTIVE"
 	f.tags[arn] = in.Tags
-	return &ecs.RegisterTaskDefinitionOutput{}, nil
+	return &ecs.RegisterTaskDefinitionOutput{TaskDefinition: &ecstypes.TaskDefinition{TaskDefinitionArn: aws.String(arn)}}, nil
 }
 
 func (f *fakeAWS) DescribeTaskDefinition(_ context.Context, in *ecs.DescribeTaskDefinitionInput, _ ...func(*ecs.Options)) (*ecs.DescribeTaskDefinitionOutput, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	latest := ""
-	for arn, status := range f.defs {
-		if status == "ACTIVE" && strings.HasPrefix(path.Base(arn), aws.ToString(in.TaskDefinition)+":") && arn > latest {
-			latest = arn
-		}
-	}
-	if latest != "" {
-		return &ecs.DescribeTaskDefinitionOutput{Tags: f.tags[latest]}, nil
+	if _, ok := f.defs[aws.ToString(in.TaskDefinition)]; ok {
+		return &ecs.DescribeTaskDefinitionOutput{Tags: f.tags[aws.ToString(in.TaskDefinition)]}, nil
 	}
 	return nil, &ecstypes.ClientException{Message: aws.String("Unable to describe task definition.")}
 }
@@ -103,12 +103,17 @@ func (f *fakeAWS) DescribeTaskDefinition(_ context.Context, in *ecs.DescribeTask
 func (f *fakeAWS) ListTaskDefinitions(_ context.Context, in *ecs.ListTaskDefinitionsInput, _ ...func(*ecs.Options)) (*ecs.ListTaskDefinitionsOutput, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	want := in.Status
+	if want == "" {
+		want = ecstypes.TaskDefinitionStatusActive
+	}
 	var arns []string
 	for arn, status := range f.defs {
-		if status == "ACTIVE" && strings.HasPrefix(path.Base(arn), aws.ToString(in.FamilyPrefix)) {
+		if status == string(want) && strings.HasPrefix(path.Base(arn), aws.ToString(in.FamilyPrefix)) {
 			arns = append(arns, arn)
 		}
 	}
+	slices.Sort(arns)
 	return &ecs.ListTaskDefinitionsOutput{TaskDefinitionArns: arns}, nil
 }
 
@@ -135,16 +140,22 @@ func (f *fakeAWS) CreateAccessPoint(_ context.Context, in *efs.CreateAccessPoint
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	id := "fsap-" + aws.ToString(in.ClientToken)
+	if _, ok := f.points[id]; ok {
+		return nil, &efstypes.AccessPointAlreadyExists{AccessPointId: aws.String(id)}
+	}
 	f.points[id] = efstypes.AccessPointDescription{AccessPointId: aws.String(id), Tags: in.Tags, RootDirectory: in.RootDirectory}
 	return &efs.CreateAccessPointOutput{AccessPointId: aws.String(id)}, nil
 }
 
-func (f *fakeAWS) DescribeAccessPoints(context.Context, *efs.DescribeAccessPointsInput, ...func(*efs.Options)) (*efs.DescribeAccessPointsOutput, error) {
+func (f *fakeAWS) DescribeAccessPoints(_ context.Context, in *efs.DescribeAccessPointsInput, _ ...func(*efs.Options)) (*efs.DescribeAccessPointsOutput, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := &efs.DescribeAccessPointsOutput{}
-	for _, ap := range f.points {
-		out.AccessPoints = append(out.AccessPoints, ap)
+	for id, ap := range f.points {
+		if in.AccessPointId == nil || aws.ToString(in.AccessPointId) == id {
+			ap.LifeCycleState = efstypes.LifeCycleStateAvailable
+			out.AccessPoints = append(out.AccessPoints, ap)
+		}
 	}
 	return out, nil
 }

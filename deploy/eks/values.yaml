@@ -32,6 +32,11 @@ sandbox:
 egress:
   # A NetworkPolicy cannot narrow this mode; cilium-egress.yaml denies all public egress but agentd.
   mode: publicInternet
+  # Our cloud's cluster has a private API endpoint, inside the chart's private ranges. A cluster
+  # with a public endpoint lists each address its host name resolves to here, as a /32, and sets
+  # clusterIsPrivate to false.
+  clusterCIDRs: []
+  clusterIsPrivate: true
   cmaServer:
     cidr: ""
     port: 443

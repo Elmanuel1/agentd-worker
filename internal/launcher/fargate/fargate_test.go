@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -59,7 +60,7 @@ func TestLaunchAndRelease(t *testing.T) {
 	}
 	run := f.runs[2]
 	env := run.Overrides.ContainerOverrides[0]
-	if aws.ToString(run.StartedBy) != "sesn_1" || aws.ToString(run.TaskDefinition) != "agentd-sesn_1" || aws.ToString(env.Name) != "fetch" || aws.ToString(env.Environment[0].Value) != "n3" {
+	if aws.ToString(run.StartedBy) != "sesn_1" || !strings.HasPrefix(aws.ToString(run.TaskDefinition), "arn:aws:ecs:r:1:task-definition/agentd-sesn_1:") || aws.ToString(run.ClientToken) != "n3" || aws.ToString(env.Name) != "fetch" || aws.ToString(env.Environment[0].Value) != "n3" {
 		t.Errorf("RunTask %+v", run)
 	}
 	if err := l.Release(ctx, "sesn_1"); err != nil {

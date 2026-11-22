@@ -13,6 +13,10 @@ alarms. Each signal below has the threshold to alarm on, in whatever backend rec
 | `reaped` | counter | controller, reaper | stale items stopped because their worker stopped heartbeating | above 0: a worker died without its own shutdown |
 | `error_results` | counter | controller, reaper | error results posted for tool calls a dead worker owed | above 0, with `reaped` |
 
+agentd's own `work stats` also reports `pending`, items handed out and not yet acked. The
+controller acks only once a sandbox collects its item, up to the handoff wait, so `pending` is above
+0 during every launch; alarm on it only when it stays above 0 longer than the handoff wait.
+
 The proxy's `proxy_swaps`, `proxy_refusals` and `proxy_read_failures` are in the proxy's own docs;
 alarm on `proxy_read_failures` above 0.
 

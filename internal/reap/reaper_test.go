@@ -23,7 +23,7 @@ type fakeAgentd struct {
 	mu      sync.Mutex
 	items   []Item
 	events  map[ids.SessionID][]Event
-	stopErr map[ids.SessionID]error
+	stopErr map[ids.WorkID]error
 	sendErr error
 	pages   int
 	calls   []string // "stop sesn" and "send sesn ids", in order
@@ -42,7 +42,7 @@ func (f *fakeAgentd) List(_ context.Context, cursor string) ([]Item, string, err
 	return f.items[start:end], next, nil
 }
 
-func (f *fakeAgentd) Stop(_ context.Context, s ids.SessionID) error {
+func (f *fakeAgentd) Stop(_ context.Context, s ids.WorkID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "stop "+string(s))
@@ -89,17 +89,19 @@ func TestPass(t *testing.T) {
 		stop error
 		want []string
 	}{
-		{"stale is stopped before it is answered (RP-1)", Item{Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, nil, []string{"stop s", "send s [tu_2 tu_3]"}},
-		{"stale starting item by its ack", Item{Session: "s", State: StateStarting, Beat: now.Add(-7 * time.Minute)}, nil, []string{"stop s", "send s [tu_2 tu_3]"}},
-		{"beating item is left alone", Item{Session: "s", State: StateActive, Beat: now.Add(-time.Minute)}, nil, nil},
-		{"unacked item is left to reclaim", Item{Session: "s", State: StateStarting}, nil, nil},
-		{"recently stopped is answered (RP-2)", Item{Session: "s", State: StateStopped, StoppedAt: now.Add(-30 * time.Second)}, nil, []string{"send s [tu_2 tu_3]"}},
-		{"stopped before the last pass is left", Item{Session: "s", State: StateStopped, StoppedAt: now.Add(-2 * time.Minute)}, nil, nil},
-		{"a failed stop answers nothing", Item{Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, errors.New("503"), []string{"stop s"}},
+		{"stale is stopped before it is answered (RP-1)", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, nil, []string{"stop w", "send s [tu_2 tu_3]"}},
+		{"stale starting item by its ack", Item{Work: "w", Session: "s", State: StateStarting, Beat: now.Add(-7 * time.Minute)}, nil, []string{"stop w", "send s [tu_2 tu_3]"}},
+		{"beating item is left alone", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-time.Minute)}, nil, nil},
+		{"unacked item is left to reclaim", Item{Work: "w", Session: "s", State: StateStarting}, nil, nil},
+		{"recently stopped is answered (RP-2)", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-30 * time.Second)}, nil, []string{"send s [tu_2 tu_3]"}},
+		{"stopped before the last pass is left", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-2 * time.Minute)}, nil, nil},
+		{"a stopping item whose worker died is stopped", Item{Work: "w", Session: "s", State: StateStopping, Beat: now.Add(-7 * time.Minute)}, nil, []string{"stop w", "send s [tu_2 tu_3]"}},
+		{"a 409 is already stopped, and the calls are answered", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, conflict{}, []string{"stop w", "send s [tu_2 tu_3]"}},
+		{"a failed stop answers nothing", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, errors.New("503"), []string{"stop w"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			f := &fakeAgentd{items: []Item{c.item}, events: map[ids.SessionID][]Event{"s": owes}, stopErr: map[ids.SessionID]error{"s": c.stop}}
+			f := &fakeAgentd{items: []Item{c.item}, events: map[ids.SessionID][]Event{"s": owes}, stopErr: map[ids.WorkID]error{"w": c.stop}}
 			r := newReaper(t, f)
 			r.lastPass = now.Add(-time.Minute)
 			r.passAt(t.Context(), now)
@@ -185,19 +187,7 @@ func TestStatesOnlyStepForward(t *testing.T) {
 	}
 }
 
-func TestOwed(t *testing.T) {
-	cases := []struct {
-		name   string
-		events []Event
-		want   []string
-	}{
-		{"none", nil, nil},
-		{"answered and owed", owes, []string{"tu_2", "tu_3"}},
-		{"terminated owes nothing", append(slices.Clone(owes), Event{Type: SessionTerminated}), nil},
-	}
-	for _, c := range cases {
-		if got := owed(c.events); !slices.Equal(got, c.want) {
-			t.Errorf("%s: owed %v, want %v", c.name, got, c.want)
-		}
-	}
-}
+type conflict struct{}
+
+func (conflict) Error() string   { return "409" }
+func (conflict) HTTPStatus() int { return 409 }

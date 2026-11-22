@@ -14,6 +14,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/v2/option"
 	"github.com/anthropics/anthropic-sdk-go/v2/packages/param"
 
+	"github.com/Elmanuel1/agentd-worker/internal/dispatch"
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
 )
 
@@ -33,8 +34,9 @@ func (e *APIError) HTTPStatus() int { return e.status }
 // Client calls one environment's routes with one credential: an environment key, the runtime
 // key, or a session's work token.
 type Client struct {
-	api anthropic.Client
-	env ids.EnvironmentID
+	api    anthropic.Client
+	env    ids.EnvironmentID
+	worker string
 }
 
 // New builds a client that only ever dials baseURL.
@@ -51,27 +53,42 @@ func New(baseURL string, env ids.EnvironmentID, credential string, timeout time.
 	}
 }
 
-// Poll claims one item, or returns ok false when none arrived within the block.
-func (c *Client) Poll(ctx context.Context, reclaimAfter time.Duration) (ids.SessionID, ids.Secret, bool, error) {
-	work, err := c.api.Beta.Environments.Work.Poll(ctx, string(c.env), anthropic.BetaEnvironmentWorkPollParams{
+// WithWorker names the poller in each poll, so the queue's stats count it in workers_polling.
+func (c *Client) WithWorker(id string) *Client {
+	c.worker = id
+	return c
+}
+
+// Poll claims one item, or returns ok false when no session's item arrived within the block. The
+// queue also sends healthcheck items, which the SDK's worker acks and stops; so does this.
+func (c *Client) Poll(ctx context.Context, reclaimAfter time.Duration) (dispatch.Work, bool, error) {
+	params := anthropic.BetaEnvironmentWorkPollParams{
 		BlockMs:            param.NewOpt(int64(blockMs)),
 		ReclaimOlderThanMs: param.NewOpt(reclaimAfter.Milliseconds()),
-	})
+	}
+	if c.worker != "" {
+		params.AnthropicWorkerID = param.NewOpt(c.worker)
+	}
+	work, err := c.api.Beta.Environments.Work.Poll(ctx, string(c.env), params)
 	if err != nil {
-		return "", ids.Secret{}, false, wrap(err)
+		return dispatch.Work{}, false, wrap(err)
 	}
 	if work == nil || work.ID == "" {
-		return "", ids.Secret{}, false, nil
+		return dispatch.Work{}, false, nil
+	}
+	id := ids.WorkID(work.ID)
+	if work.Data.Type != "session" {
+		return dispatch.Work{}, false, errors.Join(c.Ack(ctx, id), c.Stop(ctx, id))
 	}
 	session, err := ids.ParseSessionID(work.Data.ID)
 	if err != nil {
-		return "", ids.Secret{}, false, err
+		return dispatch.Work{}, false, err
 	}
-	return session, ids.NewSecret(work.Secret), true, nil
+	return dispatch.Work{ID: id, Session: session, Secret: ids.NewSecret(work.Secret)}, true, nil
 }
 
-func (c *Client) Ack(ctx context.Context, session ids.SessionID) error {
-	_, err := c.api.Beta.Environments.Work.Ack(ctx, string(session), anthropic.BetaEnvironmentWorkAckParams{EnvironmentID: string(c.env)})
+func (c *Client) Ack(ctx context.Context, work ids.WorkID) error {
+	_, err := c.api.Beta.Environments.Work.Ack(ctx, string(work), anthropic.BetaEnvironmentWorkAckParams{EnvironmentID: string(c.env)})
 	return wrap(err)
 }
 
@@ -83,25 +100,29 @@ func (c *Client) Depth(ctx context.Context) (int64, error) {
 	return stats.Depth, nil
 }
 
-// Stop force-stops the session's item, as ant does on exit.
-func (c *Client) Stop(ctx context.Context, session ids.SessionID) error {
-	_, err := c.api.Beta.Environments.Work.Stop(ctx, string(session), anthropic.BetaEnvironmentWorkStopParams{
+// Stop force-stops the item, as ant does on exit.
+func (c *Client) Stop(ctx context.Context, work ids.WorkID) error {
+	_, err := c.api.Beta.Environments.Work.Stop(ctx, string(work), anthropic.BetaEnvironmentWorkStopParams{
 		EnvironmentID:                 string(c.env),
 		BetaSelfHostedWorkStopRequest: anthropic.BetaSelfHostedWorkStopRequestParam{Force: param.NewOpt(true)},
 	})
 	return wrap(err)
 }
 
-// Exists is false only on agentd's own 404 naming the session, as Anthropic's dispatcher reads it:
-// a proxy's 404 or any other failure keeps the session's sandbox.
-func (c *Client) Exists(ctx context.Context, session ids.SessionID) (bool, error) {
-	_, err := c.api.Beta.Sessions.Get(ctx, string(session), anthropic.BetaSessionGetParams{})
+// State counts a session gone only on agentd's own 404 naming it, as Anthropic's dispatcher reads
+// it: a proxy's 404 or any other failure is an error, and the caller keeps the sandbox.
+func (c *Client) State(ctx context.Context, session ids.SessionID) (dispatch.Session, error) {
+	got, err := c.api.Beta.Sessions.Get(ctx, string(session), anthropic.BetaSessionGetParams{})
 	if err == nil {
-		return true, nil
+		return dispatch.Session{
+			Terminated: got.Status == anthropic.BetaManagedAgentsSessionStatusTerminated,
+			Idle:       got.Status == anthropic.BetaManagedAgentsSessionStatusIdle,
+			Since:      got.UpdatedAt,
+		}, nil
 	}
 	apiErr, ok := errors.AsType[*anthropic.Error](err)
 	if !ok || apiErr.StatusCode != http.StatusNotFound || apiErr.Type() != anthropic.ErrorTypeNotFoundError {
-		return true, wrap(err)
+		return dispatch.Session{}, wrap(err)
 	}
 	var body struct {
 		Error struct {
@@ -109,9 +130,9 @@ func (c *Client) Exists(ctx context.Context, session ids.SessionID) (bool, error
 		} `json:"error"`
 	}
 	if json.Unmarshal([]byte(apiErr.RawJSON()), &body) == nil && body.Error.Message == "Session not found: "+string(session) {
-		return false, nil
+		return dispatch.Session{Gone: true}, nil
 	}
-	return true, wrap(err)
+	return dispatch.Session{}, wrap(err)
 }
 
 func wrap(err error) error {

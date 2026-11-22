@@ -19,23 +19,25 @@ var ErrHandoffTimeout = errors.New("the sandbox did not collect its work item in
 // Polled is an item the queue handed out. Its secret lives only here and in the handoff store.
 type Polled struct {
 	session ids.SessionID
+	work    ids.WorkID
 	secret  ids.Secret
 }
 
 // Launch opens the item for collection under a fresh nonce and launches the session's sandbox.
 func (p Polled) Launch(ctx context.Context, launcher Launcher, store *handoff.Store) (Launched, error) {
 	nonce := ids.NewNonce()
-	collected := store.Open(p.session, nonce, p.secret)
+	collected := store.Open(p.session, p.work, nonce, p.secret)
 	if err := launcher.Launch(ctx, p.session, nonce); err != nil {
 		store.Drop(p.session)
 		return Launched{}, fmt.Errorf("launching session %s: %w", p.session, err)
 	}
-	return Launched{session: p.session, collected: collected}, nil
+	return Launched{session: p.session, work: p.work, collected: collected}, nil
 }
 
 // Launched is a sandbox started for its item, which it has not collected yet.
 type Launched struct {
 	session   ids.SessionID
+	work      ids.WorkID
 	collected <-chan struct{}
 }
 
@@ -46,10 +48,10 @@ func (l Launched) Collect(ctx context.Context, wait time.Duration, store *handof
 	defer timer.Stop()
 	select {
 	case <-l.collected:
-		return Collected{session: l.session}, nil
+		return Collected{session: l.session, work: l.work}, nil
 	case <-timer.C:
 		if !store.Drop(l.session) {
-			return Collected{session: l.session}, nil
+			return Collected{session: l.session, work: l.work}, nil
 		}
 		if err := launcher.Stop(context.WithoutCancel(ctx), l.session); err != nil {
 			return Collected{}, errors.Join(ErrHandoffTimeout, err)
@@ -57,7 +59,7 @@ func (l Launched) Collect(ctx context.Context, wait time.Duration, store *handof
 		return Collected{}, ErrHandoffTimeout
 	case <-ctx.Done():
 		if !store.Drop(l.session) {
-			return Collected{session: l.session}, nil
+			return Collected{session: l.session, work: l.work}, nil
 		}
 		return Collected{}, ctx.Err()
 	}
@@ -66,13 +68,14 @@ func (l Launched) Collect(ctx context.Context, wait time.Duration, store *handof
 // Collected is an item the sandbox holds and agentd has not been told of.
 type Collected struct {
 	session ids.SessionID
+	work    ids.WorkID
 }
 
 func (c Collected) Ack(ctx context.Context, queue Queue) (Acked, error) {
 	ackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ackTimeout)
 	defer cancel()
-	if err := queue.Ack(ackCtx, c.session); err != nil {
-		return Acked{}, fmt.Errorf("acking session %s: %w", c.session, err)
+	if err := queue.Ack(ackCtx, c.work); err != nil {
+		return Acked{}, fmt.Errorf("acking item %s of session %s: %w", c.work, c.session, err)
 	}
 	return Acked{of: c}, nil
 }

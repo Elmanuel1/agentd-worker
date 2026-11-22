@@ -46,7 +46,7 @@ func TestWorkItem(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			store := NewStore(c.loc)
-			collected := store.Open("sesn_1", "n1", ids.NewSecret("the-secret"))
+			collected := store.Open("sesn_1", "work_1", "n1", ids.NewSecret("the-secret"))
 			srv := NewServer(store, "env_1", "https://agentd.test", slog.New(slog.NewJSONHandler(io.Discard, nil)))
 			req := httptest.NewRequest(c.method, "/work-item", nil)
 			req.Header.Set(NonceHeader, string(c.nonce))
@@ -71,7 +71,7 @@ func TestWorkItem(t *testing.T) {
 			if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 				t.Fatal(err)
 			}
-			want := Item{SessionID: "sesn_1", WorkID: "sesn_1", EnvironmentID: "env_1", BaseURL: "https://agentd.test", Secret: "the-secret"}
+			want := Item{SessionID: "sesn_1", WorkID: "work_1", EnvironmentID: "env_1", BaseURL: "https://agentd.test", Secret: "the-secret"}
 			if got != want {
 				t.Errorf("got %+v", got)
 			}
@@ -81,7 +81,7 @@ func TestWorkItem(t *testing.T) {
 
 func TestDropAfterCollectionReportsCollected(t *testing.T) {
 	store := NewStore(locator{netip.MustParseAddr("192.0.2.1"), true, nil})
-	store.Open("sesn_1", "n1", ids.NewSecret("s"))
+	store.Open("sesn_1", "work_1", "n1", ids.NewSecret("s"))
 	if !store.Drop("sesn_1") {
 		t.Fatal("an uncollected item was not dropped")
 	}

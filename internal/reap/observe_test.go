@@ -20,7 +20,7 @@ func TestLogsAndMetrics(t *testing.T) {
 	var logged bytes.Buffer
 	now := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
 	beat := now.Add(-7 * time.Minute)
-	f := &fakeAgentd{items: []Item{{Session: "s", State: StateActive, Beat: beat}}, events: map[ids.SessionID][]Event{"s": owes}}
+	f := &fakeAgentd{items: []Item{{Work: "w", Session: "s", State: StateActive, Beat: beat}}, events: map[ids.SessionID][]Event{"s": owes}}
 	r, err := New(Config{Interval: time.Minute, StaleAfter: 360 * time.Second}, f, events{f}, meter, slog.New(slog.NewJSONHandler(&logged, nil)))
 	if err != nil {
 		t.Fatal(err)

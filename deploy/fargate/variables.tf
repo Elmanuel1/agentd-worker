@@ -88,3 +88,9 @@ variable "endpoints_security_group_id" {
   description = "The security group of the VPC's interface endpoints for ECR and CloudWatch Logs."
   type        = string
 }
+
+variable "retention_days" {
+  description = "Deletes the storage of a session idle this many days; 0 keeps it until the session is deleted or archived."
+  type        = number
+  default     = 0
+}

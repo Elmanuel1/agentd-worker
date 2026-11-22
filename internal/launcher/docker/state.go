@@ -61,15 +61,34 @@ func (l *Launcher) Address(ctx context.Context, session ids.SessionID) (netip.Ad
 	return netip.Addr{}, false, nil
 }
 
-// Stop removes the session's containers and the volume that held its work item, keeping /workspace.
+// workerGrace is the seconds a worker gets after SIGTERM, as Anthropic's operations page advises
+// (--stop-timeout 60): ant posts its error result and stops its item before it exits.
+const workerGrace = 60
+
+// Stop stops the worker with SIGTERM, then the sidecar, then removes the session's containers and
+// the volume that held its work item, keeping /workspace.
 func (l *Launcher) Stop(ctx context.Context, session ids.SessionID) error {
 	containers, err := l.containers(ctx, session)
 	if err != nil {
 		return err
 	}
 	var errs []error
+	for _, role := range []string{roleWorker, roleSidecar} {
+		grace := map[string]int{roleWorker: workerGrace, roleSidecar: sidecarGrace}[role]
+		for _, c := range containers {
+			if c.Labels[labelRole] != role || c.State != container.StateRunning {
+				continue
+			}
+			_, err := l.cli.ContainerStop(ctx, c.ID, client.ContainerStopOptions{Timeout: &grace})
+			if err != nil && !cerrdefs.IsNotFound(err) {
+				errs = append(errs, fmt.Errorf("stopping %s: %w", role, err))
+			}
+		}
+	}
 	for _, c := range containers {
-		if _, err := l.cli.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true}); err != nil && !cerrdefs.IsNotFound(err) {
+		// A conflict is a removal already under way, by this sandbox's own watcher.
+		_, err := l.cli.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true})
+		if err != nil && !cerrdefs.IsNotFound(err) && !cerrdefs.IsConflict(err) {
 			errs = append(errs, fmt.Errorf("removing container %s: %w", c.ID, err))
 		}
 	}

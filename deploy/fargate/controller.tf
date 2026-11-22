@@ -22,6 +22,8 @@ locals {
     ANTHROPIC_ENVIRONMENT_ID    = var.environment_id
     AGENTD_WORKER_LAUNCHER      = "fargate"
     AGENTD_MAX_SANDBOXES        = tostring(var.max_sandboxes)
+    AGENTD_HANDOFF_WAIT_SECONDS = "90"
+    AGENTD_RETENTION_DAYS       = tostring(var.retention_days)
     AGENTD_ECS_CLUSTER          = aws_ecs_cluster.this.name
     AGENTD_SUBNETS              = join(",", var.private_subnet_ids)
     AGENTD_SECURITY_GROUPS      = aws_security_group.sandbox.id

@@ -7,7 +7,6 @@ import (
 	"net/netip"
 	"path"
 	"slices"
-	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
@@ -20,7 +19,7 @@ import (
 
 // List returns each session with a task that should run or an access point tagged with it.
 func (l *Launcher) List(ctx context.Context) ([]dispatch.Sandbox, error) {
-	tasks, err := l.tasks(ctx, "")
+	tasks, err := l.listTasks(ctx, "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -47,14 +46,18 @@ func (l *Launcher) List(ctx context.Context) ([]dispatch.Sandbox, error) {
 // Address is the task's private IP once it, or its fetch container, is RUNNING. A task still
 // starting runs without an address.
 func (l *Launcher) Address(ctx context.Context, session ids.SessionID) (netip.Addr, bool, error) {
-	tasks, err := l.tasks(ctx, session)
+	l.mu.Lock()
+	arn := l.tasks[session]
+	l.mu.Unlock()
+	tasks, err := l.listTasks(ctx, session, arn)
 	if err != nil || len(tasks) == 0 {
 		return netip.Addr{}, false, err
 	}
 	for _, t := range tasks {
-		running := aws.ToString(t.LastStatus) == "RUNNING" || slices.ContainsFunc(t.Containers, func(c ecstypes.Container) bool {
+		fetchRuns := slices.ContainsFunc(t.Containers, func(c ecstypes.Container) bool {
 			return aws.ToString(c.Name) == containerFetch && aws.ToString(c.LastStatus) == "RUNNING"
 		})
+		running := aws.ToString(t.DesiredStatus) == "RUNNING" && (aws.ToString(t.LastStatus) == "RUNNING" || fetchRuns)
 		if !running {
 			continue
 		}
@@ -71,7 +74,10 @@ func (l *Launcher) Address(ctx context.Context, session ids.SessionID) (netip.Ad
 }
 
 func (l *Launcher) Stop(ctx context.Context, session ids.SessionID) error {
-	tasks, err := l.tasks(ctx, session)
+	l.mu.Lock()
+	delete(l.tasks, session)
+	l.mu.Unlock()
+	tasks, err := l.listTasks(ctx, session, "")
 	if err != nil {
 		return err
 	}
@@ -101,32 +107,4 @@ func (l *Launcher) Release(ctx context.Context, session ids.SessionID) error {
 		return fmt.Errorf("removing the session's directory: %w", err)
 	}
 	return l.deleteFamily(ctx, session)
-}
-
-func (l *Launcher) deleteFamily(ctx context.Context, session ids.SessionID) error {
-	var arns []string
-	in := &ecs.ListTaskDefinitionsInput{FamilyPrefix: aws.String(family(session))}
-	for p := ecs.NewListTaskDefinitionsPaginator(l.ecs, in); p.HasMorePages(); {
-		page, err := p.NextPage(ctx)
-		if err != nil {
-			return fmt.Errorf("listing the family's revisions: %w", err)
-		}
-		for _, arn := range page.TaskDefinitionArns {
-			// The prefix also matches longer session ids; the ARN ends in family:revision.
-			if strings.HasPrefix(path.Base(arn), family(session)+":") {
-				arns = append(arns, arn)
-			}
-		}
-	}
-	for _, arn := range arns {
-		if _, err := l.ecs.DeregisterTaskDefinition(ctx, &ecs.DeregisterTaskDefinitionInput{TaskDefinition: aws.String(arn)}); err != nil {
-			return fmt.Errorf("deregistering %s: %w", arn, err)
-		}
-	}
-	for chunk := range slices.Chunk(arns, 10) {
-		if _, err := l.ecs.DeleteTaskDefinitions(ctx, &ecs.DeleteTaskDefinitionsInput{TaskDefinitions: chunk}); err != nil {
-			return fmt.Errorf("deleting the family's revisions: %w", err)
-		}
-	}
-	return nil
 }

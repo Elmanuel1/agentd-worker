@@ -21,7 +21,7 @@ const NonceHeader = "X-CMA-Assignment-Nonce"
 // Item is the body of GET /work-item: the five fields Anthropic's worker script reads.
 type Item struct {
 	SessionID     ids.SessionID     `json:"session_id"`
-	WorkID        ids.SessionID     `json:"work_id"`
+	WorkID        ids.WorkID        `json:"work_id"`
 	EnvironmentID ids.EnvironmentID `json:"environment_id"`
 	BaseURL       string            `json:"base_url"`
 	Secret        string            `json:"secret"`
@@ -60,7 +60,7 @@ func (s *Server) workItem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	item := Item{SessionID: session, WorkID: session, EnvironmentID: s.env, BaseURL: s.baseURL, Secret: e.secret.Reveal()}
+	item := Item{SessionID: session, WorkID: e.work, EnvironmentID: s.env, BaseURL: s.baseURL, Secret: e.secret.Reveal()}
 	w.Header().Set("Content-Type", "application/json")
 	err = json.NewEncoder(w).Encode(item)
 	if err == nil {

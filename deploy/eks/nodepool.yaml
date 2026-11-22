@@ -40,7 +40,8 @@ metadata:
   name: agentd-sandboxes
 spec:
   amiSelectorTerms:
-    - alias: al2023@latest
+    # Pinned, as Karpenter advises for production; bump with the gVisor release below.
+    - alias: al2023@v20261119
   role: agentd-sandbox-nodes
   subnetSelectorTerms:
     - tags:
@@ -60,6 +61,9 @@ spec:
 
     #!/bin/bash
     set -euo pipefail
+    # A node that cannot run runsc must not join: the chart's RuntimeClass would place sandboxes
+    # on it that never start. Karpenter replaces a node that powers off.
+    trap 'poweroff' ERR
     # gVisor release 20261116 for arm64, checked against the sha512 read from its release on 2026-11-22.
     # Bump the release and the digest together.
     release=20261116

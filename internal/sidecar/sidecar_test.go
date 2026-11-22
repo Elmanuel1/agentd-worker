@@ -19,7 +19,7 @@ func (e apiError) HTTPStatus() int { return int(e) }
 
 type items struct {
 	err     error
-	stopped []ids.SessionID
+	stopped []ids.WorkID
 	token   string
 }
 
@@ -63,7 +63,7 @@ func TestStop(t *testing.T) {
 	}
 }
 
-func (i *items) Stop(_ context.Context, s ids.SessionID) error {
+func (i *items) Stop(_ context.Context, s ids.WorkID) error {
 	i.stopped = append(i.stopped, s)
 	return i.err
 }
@@ -104,7 +104,7 @@ func TestNoItemStopsNothing(t *testing.T) {
 func writeItem(t *testing.T, dir string) {
 	t.Helper()
 	files := map[string]string{
-		"session_id": "sesn_1", "environment_id": "env_1", "base_url": "https://agentd.test",
+		"session_id": "sesn_1", "work_id": "work_1", "environment_id": "env_1", "base_url": "https://agentd.test",
 		"secret": base64.RawURLEncoding.EncodeToString([]byte(`{"sessions_token":"tok"}`)),
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "work-item"), 0o700); err != nil {

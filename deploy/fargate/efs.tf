@@ -8,10 +8,20 @@ resource "aws_efs_file_system" "workspaces" {
   tags             = { Name = "${var.name}-workspaces" }
 }
 
+data "aws_subnet" "private" {
+  for_each = toset(var.private_subnet_ids)
+  id       = each.value
+}
+
+# EFS takes one mount target per Availability Zone, so one subnet of each zone gets it.
+locals {
+  subnet_by_zone = { for s in data.aws_subnet.private : s.availability_zone => s.id... }
+}
+
 resource "aws_efs_mount_target" "workspaces" {
-  for_each        = toset(var.private_subnet_ids)
+  for_each        = local.subnet_by_zone
   file_system_id  = aws_efs_file_system.workspaces.id
-  subnet_id       = each.value
+  subnet_id       = each.value[0]
   security_groups = [aws_security_group.efs.id]
 }
 
@@ -20,14 +30,17 @@ resource "aws_efs_file_system_policy" "workspaces" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      # A file system policy replaces EFS's default allow, so sandbox tasks, which mount through
-      # their access point with no IAM identity, need this one.
-      Sid       = "MountThroughTargets"
+      # Sandboxes mount with their task role, and only through an access point: one claims the
+      # client's uid without it, and could reach every session's directory.
+      Sid       = "SandboxesThroughAccessPoints"
       Effect    = "Allow"
-      Principal = { AWS = "*" }
+      Principal = { AWS = aws_iam_role.sandbox.arn }
       Action    = ["elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"]
       Resource  = aws_efs_file_system.workspaces.arn
-      Condition = { Bool = { "elasticfilesystem:AccessedViaMountTarget" = "true" } }
+      Condition = {
+        Bool       = { "elasticfilesystem:AccessedViaMountTarget" = "true" }
+        StringLike = { "elasticfilesystem:AccessPointArn" = "arn:aws:elasticfilesystem:${local.region}:${local.account}:access-point/*" }
+      }
       }, {
       Sid       = "TLSOnly"
       Effect    = "Deny"

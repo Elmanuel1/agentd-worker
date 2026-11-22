@@ -5,7 +5,8 @@ import (
 	"time"
 )
 
-// Release releases the sandboxes of sessions agentd no longer has, every ReleaseInterval, until ctx ends.
+// Release releases, every ReleaseInterval until ctx ends, the sandboxes and storage of sessions that
+// are deleted or archived, and of those idle past Retention, as Anthropic's dispatcher does.
 func (c *Controller) Release(ctx context.Context) error {
 	ticker := time.NewTicker(c.cfg.ReleaseInterval)
 	defer ticker.Stop()
@@ -21,12 +22,12 @@ func (c *Controller) Release(ctx context.Context) error {
 			continue
 		}
 		for _, sb := range sandboxes {
-			exists, err := c.sessions.Exists(ctx, sb.Session)
+			state, err := c.sessions.State(ctx, sb.Session)
 			if err != nil {
 				c.log.Warn("reading session failed; keeping its sandbox", "session_id", sb.Session, "error", err)
 				continue
 			}
-			if exists {
+			if !state.Over(sb.Running, time.Now(), c.cfg.Retention) {
 				continue
 			}
 			if err := c.launcher.Release(ctx, sb.Session); err != nil {
@@ -34,7 +35,7 @@ func (c *Controller) Release(ctx context.Context) error {
 				continue
 			}
 			c.metrics.releases.Add(ctx, 1)
-			c.log.Info("released the sandbox of a gone session", "session_id", sb.Session)
+			c.log.Info("released the sandbox of an ended session", "session_id", sb.Session, "gone", state.Gone, "terminated", state.Terminated)
 		}
 	}
 }

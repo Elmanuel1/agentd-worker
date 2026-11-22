@@ -2,6 +2,8 @@ package agentd
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go/v2"
@@ -11,11 +13,17 @@ import (
 	"github.com/Elmanuel1/agentd-worker/internal/reap"
 )
 
-// pageSize is the items per page of the reaper's list.
-const pageSize = 100
+// pageSize is the list routes' maximum page.
+const pageSize = 1000
 
 // errorText is the content of the error result posted for an owed call.
 const errorText = "The worker running this tool call stopped before it finished."
+
+// reapTypes are the only events the reaper reads, so a long session's history costs few pages.
+var reapTypes = []anthropic.BetaManagedAgentsSessionEventType{
+	reap.ToolUse, reap.ToolResult, reap.Confirmation, reap.Interrupt,
+	reap.ThreadTerminated, reap.SessionTerminated, reap.SessionDeleted,
+}
 
 // List returns one page of the environment's items.
 func (c *Client) List(ctx context.Context, cursor string) ([]reap.Item, string, error) {
@@ -37,7 +45,9 @@ func (c *Client) List(ctx context.Context, cursor string) ([]reap.Item, string, 
 		if beat.IsZero() {
 			beat = parse(w.AcknowledgedAt)
 		}
-		items = append(items, reap.Item{Session: session, State: string(w.State), Beat: beat, StoppedAt: parse(w.StoppedAt)})
+		items = append(items, reap.Item{
+			Work: ids.WorkID(w.ID), Session: session, State: string(w.State), Beat: beat, StoppedAt: parse(w.StoppedAt),
+		})
 	}
 	return items, page.NextPage, nil
 }
@@ -49,34 +59,48 @@ type Events struct {
 
 func (c *Client) Events() Events { return Events{api: c.api} }
 
-// List returns every event of the session, oldest first.
+// List returns the session's tool-call events, oldest first.
 func (e Events) List(ctx context.Context, session ids.SessionID) ([]reap.Event, error) {
 	pager := e.api.Beta.Sessions.Events.ListAutoPaging(ctx, string(session), anthropic.BetaSessionEventListParams{
-		Limit: param.NewOpt(int64(1000)),
+		Limit: param.NewOpt(int64(pageSize)),
 		Order: anthropic.BetaSessionEventListParamsOrderAsc,
+		Types: reapTypes,
 	})
 	var out []reap.Event
 	for pager.Next() {
 		ev := pager.Current()
-		out = append(out, reap.Event{Type: ev.Type, ID: ev.ID, ToolUseID: ev.ToolUseID})
+		var confirmation struct {
+			Result string `json:"result"`
+		}
+		if ev.Type == reap.Confirmation {
+			json.Unmarshal([]byte(ev.RawJSON()), &confirmation)
+		}
+		out = append(out, reap.Event{
+			Type: ev.Type, ID: ev.ID, ToolUseID: ev.ToolUseID, Permission: string(ev.EvaluatedPermission),
+			Thread: ev.SessionThreadID, At: ev.ProcessedAt, Verdict: confirmation.Result,
+		})
 	}
 	return out, wrap(pager.Err())
 }
 
-// Send posts one error user.tool_result per call, in one request.
+// Send posts one error user.tool_result per call, each in its own request, so one the server
+// refuses does not keep the others unanswered.
 func (e Events) Send(ctx context.Context, session ids.SessionID, toolUseIDs []string) error {
-	events := make([]anthropic.BetaManagedAgentsEventParamsUnion, 0, len(toolUseIDs))
+	var errs []error
 	for _, id := range toolUseIDs {
-		events = append(events, anthropic.BetaManagedAgentsEventParamsUnion{OfUserToolResult: &anthropic.BetaManagedAgentsUserToolResultEventParams{
+		result := anthropic.BetaManagedAgentsUserToolResultEventParams{
 			ToolUseID: id,
 			IsError:   param.NewOpt(true),
 			Content: []anthropic.BetaManagedAgentsUserToolResultEventParamsContentUnion{
 				{OfText: &anthropic.BetaManagedAgentsTextBlockParam{Text: errorText}},
 			},
-		}})
+		}
+		_, err := e.api.Beta.Sessions.Events.Send(ctx, string(session), anthropic.BetaSessionEventSendParams{
+			Events: []anthropic.BetaManagedAgentsEventParamsUnion{{OfUserToolResult: &result}},
+		})
+		errs = append(errs, wrap(err))
 	}
-	_, err := e.api.Beta.Sessions.Events.Send(ctx, string(session), anthropic.BetaSessionEventSendParams{Events: events})
-	return wrap(err)
+	return errors.Join(errs...)
 }
 
 func parse(ts string) time.Time {

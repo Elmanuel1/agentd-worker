@@ -66,7 +66,14 @@ type rootDirs struct{}
 
 func (rootDirs) RemoveAll(path string) error { return os.RemoveAll(path) }
 
+// fargateMaxWait keeps the handoff wait inside the 120 s a Fargate container may wait for its
+// dependency, with room for the image pull.
+const fargateMaxWait = 110 * time.Second
+
 func newFargate(ctx context.Context, sc sandboxConfig) (backend, error) {
+	if sc.handoffWait > fargateMaxWait {
+		return nil, fmt.Errorf("AGENTD_HANDOFF_WAIT_SECONDS is %s; on Fargate it must be at most %s", sc.handoffWait, fargateMaxWait)
+	}
 	var e env
 	cfg := fargate.Config{
 		Cluster: e.required("AGENTD_ECS_CLUSTER"), Subnets: e.list("AGENTD_SUBNETS"), SecurityGroups: e.list("AGENTD_SECURITY_GROUPS"),

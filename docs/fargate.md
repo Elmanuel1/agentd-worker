@@ -17,8 +17,23 @@ Fargate task for it. `deploy/fargate` is the Terraform for one environment.
    EFS file system, the roles, the security groups, the handoff certificate and a private DNS name
    for it, and the controller service. Keep the state encrypted: it holds the handoff key.
 
+## Quotas
+
+Request these before load, from Service Quotas:
+
+| Quota | Default | Why |
+|---|---|---|
+| Fargate On-Demand vCPU resource count | 6 | each sandbox takes 0.5 vCPU: 100 sandboxes need 50 |
+| ECS task-definition modify actions (L-1E6DEB89) | 1 per second, burst 20 | each new session registers its family once, and Release deregisters it |
+| EFS access points per file system | 10,000 | one per session until the session is deleted or archived, or idle past `retention_days` |
+
+The S3 gateway endpoint's route tables must cover the private subnets, or image pulls fail.
+
+## Sessions
+
 Each session gets an EFS access point at `/sessions/<session id>`, created with the session id as
 its client token, and a task-definition family `agentd-<session id>` that mounts it. The task runs
 fetch, then the worker once fetch succeeds, and a sidecar, on ARM64, with a task role that holds no
-permission. When agentd deletes the session, the controller deletes its access point, its
-directory and its family.
+permission. When the session is deleted or archived, or idle past `retention_days`, the
+controller deletes its access point, its directory and its family. The workspace mounts with the
+task role through its access point only; the file system's policy refuses any other client.

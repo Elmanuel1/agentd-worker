@@ -17,7 +17,7 @@ func TestMetrics(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		reader := sdkmetric.NewManualReader()
 		meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("test")
-		r := newMeteredRig(t, cfg, fakeSessions{"sesn_gone": errGone}, meter)
+		r := newMeteredRig(t, cfg, fakeSessions{"sesn_gone": Session{Gone: true}}, meter)
 		r.backend.running["sesn_gone"] = false
 		ctx, cancel := context.WithCancel(t.Context())
 		done := make(chan struct{})

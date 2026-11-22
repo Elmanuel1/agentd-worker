@@ -54,6 +54,19 @@ func (e *env) number(key string, def int) int {
 	return n
 }
 
+// days reads a count of days, where zero, the default, turns the setting off.
+func (e *env) days(key string) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		e.errs = append(e.errs, key+" must be a whole number of days, 0 or more")
+	}
+	return n
+}
+
 func (e *env) duration(key string, def time.Duration) time.Duration {
 	v := os.Getenv(key)
 	if v == "" {

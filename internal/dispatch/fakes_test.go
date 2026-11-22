@@ -2,7 +2,6 @@ package dispatch
 
 import (
 	"context"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -27,40 +26,50 @@ type item struct {
 	secret  ids.Secret
 }
 
+// workOf is the work id the fake queue gives a session's item, distinct from the session's id
+// as on live.
+func workOf(s ids.SessionID) ids.WorkID { return ids.WorkID("work_" + string(s)) }
+
 type fakeQueue struct {
 	items chan item
 	mu    sync.Mutex
 	polls int
-	acked []ids.SessionID
+	acked []ids.WorkID
+	// failAcks fails that many acks before the next succeeds.
+	failAcks int
 }
 
-func (q *fakeQueue) Poll(ctx context.Context, _ time.Duration) (ids.SessionID, ids.Secret, bool, error) {
+func (q *fakeQueue) Poll(ctx context.Context, _ time.Duration) (Work, bool, error) {
 	q.mu.Lock()
 	q.polls++
 	q.mu.Unlock()
 	select {
 	case it := <-q.items:
-		return it.session, it.secret, true, nil
+		return Work{ID: workOf(it.session), Session: it.session, Secret: it.secret}, true, nil
 	case <-ctx.Done():
-		return "", ids.Secret{}, false, ctx.Err()
+		return Work{}, false, ctx.Err()
 	case <-time.After(999 * time.Millisecond):
-		return "", ids.Secret{}, false, nil
+		return Work{}, false, nil
 	}
 }
 
-func (q *fakeQueue) Ack(_ context.Context, s ids.SessionID) error {
+func (q *fakeQueue) Ack(_ context.Context, s ids.WorkID) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if q.failAcks > 0 {
+		q.failAcks--
+		return context.DeadlineExceeded
+	}
 	q.acked = append(q.acked, s)
 	return nil
 }
 
 func (q *fakeQueue) Depth(context.Context) (int64, error) { return int64(len(q.items)), nil }
 
-func (q *fakeQueue) state() (int, []ids.SessionID) {
+func (q *fakeQueue) state() (int, []ids.WorkID) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return q.polls, append([]ids.SessionID(nil), q.acked...)
+	return q.polls, append([]ids.WorkID(nil), q.acked...)
 }
 
 // fakeBackend is a Launcher and a Locator over an in-memory set of sandboxes.
@@ -129,17 +138,18 @@ func (b *fakeBackend) calls() (launched, stopped, released []ids.SessionID) {
 	return append([]ids.SessionID(nil), b.launched...), append([]ids.SessionID(nil), b.stopped...), append([]ids.SessionID(nil), b.released...)
 }
 
-type fakeSessions map[ids.SessionID]error
+// fakeSessions answers each listed session's state, or an error for it; unlisted ones are live.
+type fakeSessions map[ids.SessionID]any
 
-func (f fakeSessions) Exists(_ context.Context, s ids.SessionID) (bool, error) {
-	err, ok := f[s]
-	if errors.Is(err, errGone) {
-		return false, nil
+func (f fakeSessions) State(_ context.Context, s ids.SessionID) (Session, error) {
+	switch v := f[s].(type) {
+	case Session:
+		return v, nil
+	case error:
+		return Session{}, v
 	}
-	return ok || err == nil, err
+	return Session{}, nil
 }
-
-var errGone = errors.New("gone")
 
 type rig struct {
 	queue   *fakeQueue

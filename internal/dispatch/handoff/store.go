@@ -27,6 +27,7 @@ type Locator interface {
 }
 
 type entry struct {
+	work      ids.WorkID
 	nonce     ids.Nonce
 	secret    ids.Secret
 	collected chan struct{}
@@ -47,10 +48,10 @@ func NewStore(locator Locator) *Store {
 
 // Open holds secret for session under nonce, replacing an uncollected earlier one, and returns a
 // channel that closes once the sandbox has collected it.
-func (s *Store) Open(session ids.SessionID, nonce ids.Nonce, secret ids.Secret) <-chan struct{} {
+func (s *Store) Open(session ids.SessionID, work ids.WorkID, nonce ids.Nonce, secret ids.Secret) <-chan struct{} {
 	s.lockSettled(session)
 	defer s.mu.Unlock()
-	e := &entry{nonce: nonce, secret: secret, collected: make(chan struct{})}
+	e := &entry{work: work, nonce: nonce, secret: secret, collected: make(chan struct{})}
 	s.open[session] = e
 	return e.collected
 }

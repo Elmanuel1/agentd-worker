@@ -3,6 +3,26 @@ data "aws_region" "current" {}
 data "aws_vpc_endpoint" "s3" {
   vpc_id       = var.vpc_id
   service_name = "com.amazonaws.${data.aws_region.current.region}.s3"
+  lifecycle {
+    postcondition {
+      condition = alltrue([
+        for st in jsondecode(self.policy).Statement :
+        st.Effect != "Allow" || alltrue([for r in flatten([lookup(st, "Resource", "*")]) : r == "arn:aws:s3:::prod-${data.aws_region.current.region}-starport-layer-bucket/*"])
+      ])
+      error_message = "The S3 gateway endpoint's policy must allow only arn:aws:s3:::prod-<region>-starport-layer-bucket/*: sandboxes reach S3 through it."
+    }
+  }
+}
+
+# The handoff's private DNS name and the interface endpoints need the VPC's DNS.
+data "aws_vpc" "this" {
+  id = var.vpc_id
+  lifecycle {
+    postcondition {
+      condition     = self.enable_dns_support && self.enable_dns_hostnames
+      error_message = "The VPC needs enableDnsSupport and enableDnsHostnames."
+    }
+  }
 }
 
 resource "aws_security_group" "controller" {
@@ -82,7 +102,7 @@ resource "aws_vpc_security_group_egress_rule" "sandbox_efs" {
 
 # Fargate pulls the task's images over its own interface: ECR's layers come from S3. The prefix
 # list covers every bucket in the region, so the endpoint's policy must allow only ECR's layer
-# bucket; the check below fails the plan when it allows more.
+# bucket; the postcondition above fails the plan when it allows more.
 resource "aws_vpc_security_group_egress_rule" "sandbox_image_layers" {
   security_group_id = aws_security_group.sandbox.id
   prefix_list_id    = data.aws_vpc_endpoint.s3.prefix_list_id
@@ -107,14 +127,4 @@ resource "aws_vpc_security_group_egress_rule" "sandbox_endpoints" {
   ip_protocol                  = "tcp"
   from_port                    = 443
   to_port                      = 443
-}
-
-check "s3_endpoint_allows_only_ecr_layers" {
-  assert {
-    condition = alltrue([
-      for st in jsondecode(data.aws_vpc_endpoint.s3.policy).Statement :
-      st.Effect != "Allow" || alltrue([for r in flatten([st.Resource]) : startswith(r, "arn:aws:s3:::prod-${data.aws_region.current.region}-starport-layer-bucket")])
-    ])
-    error_message = "The S3 gateway endpoint's policy must allow only arn:aws:s3:::prod-<region>-starport-layer-bucket/*: sandboxes reach S3 through it."
-  }
 }

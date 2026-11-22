@@ -15,9 +15,10 @@ fills them (a Kubernetes Secret, an ECS task definition's `secrets`, a vault) is
 | `AGENTD_HANDOFF_URL` | required | `GET /work-item`'s base URL as sandboxes reach it |
 | `AGENTD_HANDOFF_CERT`, `AGENTD_HANDOFF_KEY` | required | its TLS certificate and key, PEM |
 | `AGENTD_HANDOFF_CA` | required | the CA, PEM, that sandboxes verify the certificate against |
-| `AGENTD_HANDOFF_WAIT_SECONDS` | `120` | how long a sandbox has to collect its item; the queue reclaims an unacked item after twice this |
+| `AGENTD_HANDOFF_WAIT_SECONDS` | `120` | how long a sandbox has to collect its item; the queue reclaims an unacked item after twice this. At most 110 on Fargate, whose containers wait at most 120 s for a dependency |
 | `AGENTD_MAX_SANDBOXES` | `100` | items handled at once; polling pauses at this number |
-| `AGENTD_RELEASE_INTERVAL_SECONDS` | `600` | how often sandboxes of deleted sessions are released |
+| `AGENTD_RELEASE_INTERVAL_SECONDS` | `600` | how often the storage of deleted and archived sessions is released |
+| `AGENTD_RETENTION_DAYS` | `0` | also releases a session idle this many days with no running sandbox; `0` keeps it until it is deleted or archived, as Anthropic's dispatcher's `retentionDays` |
 | `AGENTD_REAP_INTERVAL_SECONDS` | `60` | the reaper's pass interval |
 | `AGENTD_STALE_AFTER_SECONDS` | `360` | an active item with no heartbeat for this long is stale: the 300 s lease plus 60 s |
 | `AGENTD_SANDBOX_BASE_URL` | `ANTHROPIC_BASE_URL` | agentd's API as sandboxes reach it |
@@ -29,6 +30,11 @@ fills them (a Kubernetes Secret, an ECS task definition's `secrets`, a vault) is
 The Docker adapter reads `AGENTD_DOCKER_NETWORK` (required: the network sandboxes join, from which
 they reach agentd and the controller), `AGENTD_DOCKER_RUNTIME` (default `runsc`; the controller
 refuses to start when the engine lacks it) and the engine's own `DOCKER_HOST` and `DOCKER_*` settings.
+Anthropic's worker script refuses to run where the metadata address answers, so the host rejects
+it for containers: `iptables -I DOCKER-USER -d 169.254.0.0/16 -j REJECT`.
+
+The controller names itself in each poll with its host name, so `work stats` counts it in
+`workers_polling`.
 
 The Fargate adapter reads `AGENTD_ECS_CLUSTER`, `AGENTD_SUBNETS` and `AGENTD_SECURITY_GROUPS`
 (comma-separated), `AGENTD_EFS_ID`, `AGENTD_EFS_ROOT` (default `/mnt/efs`, where the controller

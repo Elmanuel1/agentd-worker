@@ -20,9 +20,9 @@ import (
 // stopTimeout bounds the stop, which runs after a SIGTERM has cancelled ctx.
 const stopTimeout = 10 * time.Second
 
-// Items stops the session's own work item.
+// Items stops the sandbox's own work item.
 type Items interface {
-	Stop(ctx context.Context, session ids.SessionID) error
+	Stop(ctx context.Context, work ids.WorkID) error
 }
 
 // Connect builds Items for the work item's agentd and token.
@@ -77,9 +77,9 @@ func stop(ctx context.Context, cfg Config, connect Connect) error {
 	if err != nil {
 		return err
 	}
-	session, err := ids.ParseSessionID(read(dir, "session_id"))
-	if err != nil {
-		return err
+	work := ids.WorkID(read(dir, "work_id"))
+	if work == "" {
+		return errors.New("the work item has no work_id")
 	}
 	token, err := ids.NewSecret(string(secret)).WorkToken()
 	if err != nil {
@@ -88,12 +88,12 @@ func stop(ctx context.Context, cfg Config, connect Connect) error {
 	ctx, cancel := context.WithTimeout(ctx, stopTimeout)
 	defer cancel()
 	items := connect(read(dir, "base_url"), ids.EnvironmentID(read(dir, "environment_id")), token)
-	err = items.Stop(ctx, session)
+	err = items.Stop(ctx, work)
 	if se, ok := errors.AsType[statusError](err); ok && (se.HTTPStatus() == http.StatusUnauthorized || se.HTTPStatus() == http.StatusConflict) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("stopping item %s: %w", session, err)
+		return fmt.Errorf("stopping item %s: %w", work, err)
 	}
 	return nil
 }

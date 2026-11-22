@@ -17,7 +17,8 @@ const (
 )
 
 // taskDefinition is the session's family: fetch, then the worker once fetch succeeds, and a
-// non-essential sidecar, on ARM64. It sets no pidMode, so no container reads another's
+// non-essential sidecar, on ARM64. The workspace mounts through the session's access point with
+// the task's IAM identity, which the file system's policy names. It sets no pidMode, so no container reads another's
 // processes, and no secrets: the work secret reaches the task only through the handoff.
 func (l *Launcher) taskDefinition(session ids.SessionID, accessPoint string) *ecs.RegisterTaskDefinitionInput {
 	run := types.MountPoint{SourceVolume: aws.String(volumeRun), ContainerPath: aws.String("/run/cma")}
@@ -35,7 +36,7 @@ func (l *Launcher) taskDefinition(session ids.SessionID, accessPoint string) *ec
 			{Name: aws.String(volumeWorkspace), EfsVolumeConfiguration: &types.EFSVolumeConfiguration{
 				FileSystemId:        aws.String(l.cfg.FileSystemID),
 				TransitEncryption:   types.EFSTransitEncryptionEnabled,
-				AuthorizationConfig: &types.EFSAuthorizationConfig{AccessPointId: aws.String(accessPoint), Iam: types.EFSAuthorizationConfigIAMDisabled},
+				AuthorizationConfig: &types.EFSAuthorizationConfig{AccessPointId: aws.String(accessPoint), Iam: types.EFSAuthorizationConfigIAMEnabled},
 			}},
 			{Name: aws.String(volumeRun)},
 		},
@@ -53,13 +54,18 @@ func (l *Launcher) taskDefinition(session ids.SessionID, accessPoint string) *ec
 			},
 			{
 				Name: aws.String(containerWorker), Image: aws.String(l.cfg.SandboxImage), Essential: aws.Bool(true),
-				DependsOn:        []types.ContainerDependency{{ContainerName: aws.String(containerFetch), Condition: types.ContainerConditionSuccess}},
+				DependsOn: []types.ContainerDependency{{ContainerName: aws.String(containerFetch), Condition: types.ContainerConditionSuccess}},
+				// Fargate's limits for both: the handoff wait must end inside the 120 s start
+				// timeout, and ant gets 60 s after SIGTERM to post its result and stop its item.
+				StartTimeout:     aws.Int32(120),
+				StopTimeout:      aws.Int32(60),
 				MountPoints:      []types.MountPoint{workspace, run},
 				LogConfiguration: l.logs(containerWorker),
 			},
 			{
 				Name: aws.String(containerSidecar), Image: aws.String(l.cfg.ToolImage), Command: []string{"sidecar"}, User: aws.String("0"),
 				Essential:        aws.Bool(false),
+				StopTimeout:      aws.Int32(30),
 				MountPoints:      []types.MountPoint{run},
 				LogConfiguration: l.logs(containerSidecar),
 			},

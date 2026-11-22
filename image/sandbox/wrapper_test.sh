@@ -34,4 +34,27 @@ done
 echo "$out" | grep -qx 'NO_PROXY=agentd.example' || fail "NO_PROXY is not agentd's host"
 echo "$out" | grep -qx 'no_proxy=agentd.example' || fail "no_proxy is not agentd's host"
 echo "$out" | grep -qx "NODE_EXTRA_CA_CERTS=$tmp/ca.crt" || fail "the proxy CA is not trusted"
+# IM-5: a cloud session's files land under the uploads directory, read-only, where live puts them.
+mkdir -p "$tmp/bin"
+cat > "$tmp/bin/curl" <<'CURL'
+#!/bin/sh
+out=""; url=""
+while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2 ;; -H) shift 2 ;; -*) shift ;; *) url="$1"; shift ;; esac; done
+[ -n "${FAIL_CURL:-}" ] && exit 22
+case "$url" in
+*/v1/sessions/*) printf '%s' '{"resources":[{"type":"file","file_id":"file_a","mount_path":"/data.csv"},{"type":"file","file_id":"file_b"},{"type":"memory_store"}]}' > "$out" ;;
+*/v1/files/*/content) printf 'content of %s' "$url" > "$out" ;;
+esac
+CURL
+chmod +x "$tmp/bin/curl"
+staged() {
+	env -i PATH="$tmp/bin:$PATH" CMA_SHARED_DIR="$tmp/run" AGENTD_ANTHROPIC_WORKER="$tmp/fake-worker" AGENTD_PROXY_CA="$tmp/ca.crt" AGENTD_SYSTEM_CA="$tmp/ca.crt" \
+		AGENTD_CLOUD=1 AGENTD_UPLOADS_DIR="$tmp/uploads" "$@" sh "$here/wrapper.sh" >/dev/null
+}
+staged
+[ -f "$tmp/uploads/data.csv" ] && [ -f "$tmp/uploads/file_b" ] || fail "files were not staged under the uploads directory"
+[ ! -w "$tmp/uploads/data.csv" ] || fail "a staged file is writable"
+grep -q 'file_a/content' "$tmp/uploads/data.csv" || fail "data.csv does not hold file_a"
+chmod -R u+w "$tmp/uploads" && rm -rf "$tmp/uploads"
+if staged FAIL_CURL=1 2>/dev/null; then fail "a failed read of the session ran the worker anyway"; fi
 echo "wrapper: ok"

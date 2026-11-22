@@ -2,18 +2,30 @@ package reap
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"slices"
+	"net/http"
 )
+
+// statusError is an agentd answer that carries its HTTP status.
+type statusError interface {
+	error
+	HTTPStatus() int
+}
 
 // Stale is an active or starting item whose worker stopped beating.
 type Stale struct {
 	item Item
 }
 
-// Stop stops the item, so the session's next tool call queues it again.
+// Stop stops the item, so the session's next tool call queues it again. A 409 means another
+// stopped it first, as the SDK's worker reads it.
 func (s Stale) Stop(ctx context.Context, items Items) (Stopped, error) {
-	if err := items.Stop(ctx, s.item.Session); err != nil {
+	err := items.Stop(ctx, s.item.Work)
+	if se, ok := errors.AsType[statusError](err); ok && se.HTTPStatus() == http.StatusConflict {
+		err = nil
+	}
+	if err != nil {
 		return Stopped{}, fmt.Errorf("stopping item %s: %w", s.item.Session, err)
 	}
 	return Stopped{item: s.item, reaped: true}, nil
@@ -51,19 +63,3 @@ type Answered struct {
 func (a Answered) Calls() int { return a.calls }
 
 func (a Answered) Reaped() bool { return a.of.reaped }
-
-// owed returns the tool calls with no result after them, in order. A session that ended owes nothing.
-func owed(events []Event) []string {
-	var calls []string
-	for _, e := range events {
-		switch e.Type {
-		case ToolUse:
-			calls = append(calls, e.ID)
-		case ToolResult:
-			calls = slices.DeleteFunc(calls, func(id string) bool { return id == e.ToolUseID })
-		case SessionTerminated, SessionDeleted:
-			return nil
-		}
-	}
-	return calls
-}

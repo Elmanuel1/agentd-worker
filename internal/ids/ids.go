@@ -21,6 +21,9 @@ func ParseSessionID(s string) (SessionID, error) {
 	return SessionID(s), nil
 }
 
+// WorkID is a work item's id. agentd makes it the session's id; live gives it its own.
+type WorkID string
+
 // EnvironmentID is the environment or queue the controller serves.
 type EnvironmentID string
 
