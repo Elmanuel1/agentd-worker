@@ -1,6 +1,8 @@
 package docker
 
 import (
+	"slices"
+
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/api/types/network"
@@ -28,9 +30,9 @@ func labels(s ids.SessionID, role string) map[string]string {
 	return map[string]string{labelSession: string(s), labelRole: role}
 }
 
-// specs are the session's three containers. None gets a host path, the Docker socket, a host or
-// shared namespace, or an added capability; the worker, which runs the session's code, drops
-// every capability.
+// specs are the session's three containers. None gets the Docker socket, a host or shared
+// namespace, or an added capability, nor any host path but the read-only resolv.conf under runsc;
+// the worker, which runs the session's code, drops every capability.
 func (l *Launcher) specs(session ids.SessionID, nonce ids.Nonce) []client.ContainerCreateOptions {
 	run := mount.Mount{Type: mount.TypeVolume, Source: runVolume(session), Target: "/run/cma"}
 	workspace := mount.Mount{Type: mount.TypeVolume, Source: workspaceVolume(session), Target: "/workspace"}
@@ -52,6 +54,11 @@ func (l *Launcher) specs(session ids.SessionID, nonce ids.Nonce) []client.Contai
 
 func (l *Launcher) spec(session ids.SessionID, role string, cfg *container.Config, mounts []mount.Mount, drop []string) client.ContainerCreateOptions {
 	cfg.Labels = labels(session, role)
+	// Under runsc the engine's embedded resolver is out of reach, so the sandbox's one host path
+	// is the read-only resolv.conf naming the relay startResolver runs.
+	if l.cfg.Runtime != runc {
+		mounts = append(slices.Clone(mounts), mount.Mount{Type: mount.TypeBind, Source: l.resolvConf(), Target: "/etc/resolv.conf", ReadOnly: true})
+	}
 	return client.ContainerCreateOptions{
 		Name:   "agentd-" + role + "-" + string(session),
 		Config: cfg,

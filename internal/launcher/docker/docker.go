@@ -33,6 +33,8 @@ type Config struct {
 	// HandoffURL is the controller's GET /work-item base as sandboxes reach it, HandoffCA its CA in PEM.
 	HandoffURL, HandoffCA string
 	HandoffWait           time.Duration
+	// StateDir holds the resolv.conf sandboxes under runsc mount; it is a path on the engine's host.
+	StateDir string
 }
 
 // Launcher runs sandboxes on one engine. Each sandbox has a watcher that starts its worker after
@@ -59,6 +61,10 @@ func New(ctx context.Context, cli *client.Client, cfg Config, log *slog.Logger) 
 	}
 	watch, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	l := &Launcher{cli: cli, cfg: cfg, log: log, watch: watch, cancel: cancel}
+	if err := l.startResolver(ctx); err != nil {
+		cancel()
+		return nil, err
+	}
 	containers, err := l.containers(ctx, "")
 	if err != nil {
 		cancel()

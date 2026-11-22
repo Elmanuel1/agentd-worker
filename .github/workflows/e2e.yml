@@ -116,7 +116,11 @@ jobs:
           nohup "$AGENTD_BIN" > agentd.log 2>&1 &
           for _ in $(seq 1 60); do curl -s -o /dev/null http://127.0.0.1:8080/ && exit 0; sleep 1; done
           cat agentd.log; exit 1
-      - name: Sessions run in sandboxes the controller launches
+      - name: Install gVisor
+        run: e2e/install-gvisor.sh
+      - name: Sessions run in sandboxes the controller launches, under runsc
+        env:
+          AGENTD_DOCKER_RUNTIME: runsc
         run: e2e/docker.sh
       - name: Logs
         if: failure()

@@ -4,6 +4,7 @@
 //	agentd-worker fetch    a sandbox's fetch container: collects its work item
 //	agentd-worker sidecar  a sandbox's sidecar: stops the item when the worker exits
 //	agentd-worker reap     the reaper alone, for an environment served by Anthropic's chart
+//	agentd-worker resolver a DNS relay the Docker adapter runs for sandboxes under runsc
 //
 // Every setting is an environment variable; docs/configuration.md lists them.
 package main
@@ -20,13 +21,13 @@ import (
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level()}))
 	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: agentd-worker scale|fetch|sidecar|reap")
+		fmt.Fprintln(os.Stderr, "usage: agentd-worker scale|fetch|sidecar|reap|resolver")
 		os.Exit(2)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 	commands := map[string]func(context.Context, *slog.Logger) error{
-		"scale": runScale, "fetch": runFetch, "sidecar": runSidecar, "reap": runReap,
+		"scale": runScale, "fetch": runFetch, "sidecar": runSidecar, "reap": runReap, "resolver": runResolver,
 	}
 	run, ok := commands[os.Args[1]]
 	if !ok {

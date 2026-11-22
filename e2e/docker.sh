@@ -22,7 +22,8 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -su
 
 export AGENTD_WORKER_BIN="$out/agentd-worker"
 export AGENTD_E2E_LOG="$out/controller.log"
-export AGENTD_WORKER_LAUNCHER=docker AGENTD_DOCKER_NETWORK=agentd-e2e AGENTD_DOCKER_RUNTIME="${AGENTD_DOCKER_RUNTIME:-runc}"
+export AGENTD_WORKER_LAUNCHER=docker AGENTD_DOCKER_NETWORK=agentd-e2e AGENTD_DOCKER_RUNTIME="${AGENTD_DOCKER_RUNTIME:-runsc}"
+export AGENTD_DOCKER_STATE_DIR="$out"
 export AGENTD_SANDBOX_BASE_URL="http://$gateway:8080"
 export AGENTD_HANDOFF_URL="https://$gateway:8443" AGENTD_HANDOFF_ADDR="$gateway:8443"
 AGENTD_HANDOFF_CERT="$(cat "$out/handoff.crt")" AGENTD_HANDOFF_KEY="$(cat "$out/handoff.key")" AGENTD_HANDOFF_CA="$(cat "$out/handoff.crt")"

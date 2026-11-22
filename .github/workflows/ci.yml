@@ -60,10 +60,16 @@ jobs:
           tags: agentd-sandbox:ci
       - name: The sandbox image is Anthropic's, pinned, plus the CA and the wrapper
         run: image/sandbox/check.sh agentd-sandbox:ci
-      - name: The Docker adapter passes the launcher suite (runc stands in for runsc on the runner)
+      - name: The Docker adapter passes the launcher suite under runc
         run: |
           docker network create agentd-suite
           go test -count=1 -v ./internal/launcher/docker/
+      - name: Install gVisor
+        run: e2e/install-gvisor.sh
+      - name: The Docker adapter passes the launcher suite under runsc, with its DNS relay
+        env:
+          AGENTD_TEST_DOCKER_RUNTIME: runsc
+        run: go test -count=1 -v ./internal/launcher/docker/
 
   deploy:
     runs-on: ubuntu-latest

@@ -13,6 +13,7 @@ import (
 	"github.com/Elmanuel1/agentd-worker/internal/fetch"
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
 	"github.com/Elmanuel1/agentd-worker/internal/reap"
+	"github.com/Elmanuel1/agentd-worker/internal/resolver"
 	"github.com/Elmanuel1/agentd-worker/internal/sidecar"
 	"github.com/Elmanuel1/agentd-worker/internal/telemetry"
 )
@@ -80,4 +81,15 @@ func runReap(ctx context.Context, log *slog.Logger) error {
 	}
 	log.Info("reaper started", "environment_id", envID)
 	return reaper.Run(ctx)
+}
+
+func runResolver(ctx context.Context, log *slog.Logger) error {
+	var e env
+	addr := e.str("AGENTD_RESOLVER_ADDR", ":53")
+	upstream := e.str("AGENTD_RESOLVER_UPSTREAM", "127.0.0.11:53")
+	if err := e.err(); err != nil {
+		return err
+	}
+	log.Info("resolver started", "addr", addr, "upstream", upstream)
+	return resolver.Serve(ctx, addr, upstream, log)
 }

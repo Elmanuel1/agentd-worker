@@ -38,6 +38,7 @@ func newDocker(ctx context.Context, sc sandboxConfig, log *slog.Logger) (backend
 	var e env
 	cfg := docker.Config{
 		Network: e.required("AGENTD_DOCKER_NETWORK"), Runtime: e.str("AGENTD_DOCKER_RUNTIME", "runsc"),
+		StateDir:     e.str("AGENTD_DOCKER_STATE_DIR", "/var/lib/agentd-worker"),
 		SandboxImage: sc.sandboxImage, ToolImage: sc.toolImage,
 		HandoffURL: sc.handoffURL, HandoffCA: sc.handoffCA, HandoffWait: sc.handoffWait,
 	}

@@ -30,6 +30,10 @@ fills them (a Kubernetes Secret, an ECS task definition's `secrets`, a vault) is
 The Docker adapter reads `AGENTD_DOCKER_NETWORK` (required: the network sandboxes join, from which
 they reach agentd and the controller), `AGENTD_DOCKER_RUNTIME` (default `runsc`; the controller
 refuses to start when the engine lacks it) and the engine's own `DOCKER_HOST` and `DOCKER_*` settings.
+Under `runsc` a sandbox cannot reach the engine's embedded DNS, so the adapter runs
+`agentd-worker resolver`, a DNS relay, under `runc` on the sandbox network, and mounts a
+read-only `resolv.conf` naming it into each sandbox from `AGENTD_DOCKER_STATE_DIR` (default
+`/var/lib/agentd-worker`), a directory on the engine's host the controller can write.
 Anthropic's worker script refuses to run where the metadata address answers, so the host rejects
 it for containers: `iptables -I DOCKER-USER -d 169.254.0.0/16 -j REJECT`.
 
@@ -46,6 +50,11 @@ mounts the file system's root), `AGENTD_EXECUTION_ROLE_ARN`, `AGENTD_TASK_ROLE_A
 
 `ANTHROPIC_BASE_URL`, `ANTHROPIC_ENVIRONMENT_ID`, `ANTHROPIC_ENVIRONMENT_KEY`,
 `AGENTD_REAP_INTERVAL_SECONDS`, `AGENTD_STALE_AFTER_SECONDS` and the `OTEL_*` variables, as above.
+
+## `agentd-worker resolver`
+
+`AGENTD_RESOLVER_ADDR` (default `:53`) and `AGENTD_RESOLVER_UPSTREAM` (default `127.0.0.11:53`,
+the engine's embedded resolver). The Docker adapter starts it; nothing else needs it.
 
 ## `agentd-worker fetch` and `agentd-worker sidecar`
 

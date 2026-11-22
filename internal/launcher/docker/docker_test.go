@@ -41,6 +41,7 @@ func config(t *testing.T) Config {
 		HandoffURL:  "https://127.0.0.1:1",
 		HandoffCA:   testCA(t),
 		HandoffWait: 90 * time.Second,
+		StateDir:    t.TempDir(),
 	}
 }
 
@@ -113,7 +114,8 @@ func TestIsolation(t *testing.T) {
 			t.Errorf("%s runs under %q", role, hc.Runtime)
 		}
 		for _, m := range res.Container.Mounts {
-			if m.Type != "volume" || strings.Contains(m.Source, "docker.sock") {
+			resolv := m.Type == "bind" && m.Destination == "/etc/resolv.conf" && !m.RW && cfg.Runtime != runc
+			if (m.Type != "volume" && !resolv) || strings.Contains(m.Source, "docker.sock") {
 				t.Errorf("%s mounts %+v", role, m)
 			}
 		}
