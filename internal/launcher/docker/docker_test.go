@@ -141,3 +141,30 @@ func testCA(t *testing.T) string {
 	}
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 }
+
+// TestAdoptsAfterRestart holds SD-1 and DK-1 across a controller restart: a new adapter watches
+// a sandbox an earlier one launched, and removes it when its fetch gives up.
+func TestAdoptsAfterRestart(t *testing.T) {
+	cfg := config(t)
+	cfg.HandoffWait = 5 * time.Second
+	session := ids.SessionID("sesn_adopt")
+	first := newLauncher(t, cfg)
+	if err := first.Launch(t.Context(), session, ids.NewNonce()); err != nil {
+		t.Fatal(err)
+	}
+	first.Close()
+	second := newLauncher(t, cfg)
+	t.Cleanup(func() { second.Release(context.Background(), session) })
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		cs, err := second.containers(t.Context(), session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cs) == 0 {
+			return
+		}
+		time.Sleep(time.Second)
+	}
+	t.Error("the adopted sandbox was not removed after its fetch gave up")
+}

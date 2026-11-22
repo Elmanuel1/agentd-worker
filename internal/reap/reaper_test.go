@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -19,6 +20,7 @@ import (
 )
 
 type fakeAgentd struct {
+	mu      sync.Mutex
 	items   []Item
 	events  map[ids.SessionID][]Event
 	stopErr map[ids.SessionID]error
@@ -28,6 +30,8 @@ type fakeAgentd struct {
 }
 
 func (f *fakeAgentd) List(_ context.Context, cursor string) ([]Item, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.pages++
 	start, _ := strconv.Atoi(cursor)
 	end := min(start+100, len(f.items))
@@ -39,6 +43,8 @@ func (f *fakeAgentd) List(_ context.Context, cursor string) ([]Item, string, err
 }
 
 func (f *fakeAgentd) Stop(_ context.Context, s ids.SessionID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "stop "+string(s))
 	return f.stopErr[s]
 }
@@ -48,8 +54,16 @@ type events struct{ f *fakeAgentd }
 func (e events) List(_ context.Context, s ids.SessionID) ([]Event, error) { return e.f.events[s], nil }
 
 func (e events) Send(_ context.Context, s ids.SessionID, calls []string) error {
+	e.f.mu.Lock()
+	defer e.f.mu.Unlock()
 	e.f.calls = append(e.f.calls, fmt.Sprintf("send %s %v", s, calls))
 	return e.f.sendErr
+}
+
+func (f *fakeAgentd) read() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pages
 }
 
 var owes = []Event{
@@ -132,14 +146,14 @@ func TestRunReadsEveryPage(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		go r.Run(ctx)
 		synctest.Wait()
-		if f.pages != 3 {
-			t.Fatalf("first pass read %d pages, want 3", f.pages)
+		if f.read() != 3 {
+			t.Fatalf("first pass read %d pages, want 3", f.read())
 		}
 		time.Sleep(time.Minute)
 		synctest.Wait()
 		cancel()
-		if f.pages != 6 {
-			t.Errorf("read %d pages after one interval, want 6", f.pages)
+		if pages := f.read(); pages != 6 {
+			t.Errorf("read %d pages after one interval, want 6", pages)
 		}
 	})
 }

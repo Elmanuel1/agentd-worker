@@ -29,8 +29,6 @@ func TestMetrics(t *testing.T) {
 		r.collect("sesn_a")
 		time.Sleep(cfg.ReleaseInterval)
 		synctest.Wait()
-		r.queue.items <- item{"sesn_c", ids.NewSecret("s")}
-		r.queue.items <- item{"sesn_d", ids.NewSecret("s")}
 		got := collect(t, reader)
 		cancel()
 		<-done
@@ -40,10 +38,19 @@ func TestMetrics(t *testing.T) {
 				t.Errorf("%s = %d, want %d", name, got[name], v)
 			}
 		}
-		if got["queue_depth"] < 1 {
-			t.Errorf("queue_depth = %d with items queued", got["queue_depth"])
-		}
 	})
+}
+
+// TestQueueDepth reads the queue's depth while no controller consumes it.
+func TestQueueDepth(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("test")
+	r := newMeteredRig(t, cfg, nil, meter)
+	r.queue.items <- item{"sesn_a", ids.NewSecret("s")}
+	r.queue.items <- item{"sesn_b", ids.NewSecret("s")}
+	if got := collect(t, reader)["queue_depth"]; got != 2 {
+		t.Errorf("queue_depth = %d, want 2", got)
+	}
 }
 
 func collect(t *testing.T, reader *sdkmetric.ManualReader) map[string]int64 {

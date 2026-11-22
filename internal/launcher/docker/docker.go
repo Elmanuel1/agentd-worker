@@ -37,7 +37,7 @@ type Config struct {
 
 // Launcher runs sandboxes on one engine. Each sandbox has a watcher that starts its worker after
 // fetch and stops its sidecar after the worker; Close ends the watchers and waits for them, and
-// the next New adopts the sandboxes whose workers still run.
+// the next New adopts every sandbox it finds.
 type Launcher struct {
 	cli *client.Client
 	cfg Config
@@ -48,7 +48,7 @@ type Launcher struct {
 	wg     sync.WaitGroup
 }
 
-// New checks the engine has cfg.Runtime and adopts the running workers of earlier launches.
+// New checks the engine has cfg.Runtime and adopts the sandboxes of earlier launches.
 func New(ctx context.Context, cli *client.Client, cfg Config, log *slog.Logger) (*Launcher, error) {
 	info, err := cli.Info(ctx, client.InfoOptions{})
 	if err != nil {
@@ -65,19 +65,23 @@ func New(ctx context.Context, cli *client.Client, cfg Config, log *slog.Logger) 
 		return nil, err
 	}
 	byRole := map[ids.SessionID]map[string]string{}
+	created := map[ids.SessionID]bool{}
 	for _, c := range containers {
 		s := ids.SessionID(c.Labels[labelSession])
 		if byRole[s] == nil {
 			byRole[s] = map[string]string{}
 		}
 		byRole[s][c.Labels[labelRole]] = c.ID
+		created[s] = created[s] || (c.Labels[labelRole] == roleWorker && c.State == container.StateCreated)
 	}
-	for _, c := range containers {
-		if c.Labels[labelRole] != roleWorker || c.State != container.StateRunning {
+	// A worker not started yet waits on its fetch, as at launch; any other is watched until it
+	// exits, at once when it already has.
+	for s, roles := range byRole {
+		if created[s] {
+			l.wg.Go(func() { l.startWorker(watch, s, roles) })
 			continue
 		}
-		s := ids.SessionID(c.Labels[labelSession])
-		l.wg.Go(func() { l.watchWorker(watch, s, byRole[s]) })
+		l.wg.Go(func() { l.watchWorker(watch, s, roles) })
 	}
 	return l, nil
 }
@@ -117,7 +121,11 @@ func (l *Launcher) Launch(ctx context.Context, session ids.SessionID, nonce ids.
 // startWorker starts the worker once fetch exits 0, then watches it; a fetch that fails removes
 // the sandbox at once.
 func (l *Launcher) startWorker(ctx context.Context, session ids.SessionID, byRole map[string]string) {
-	if code, err := l.wait(ctx, byRole[roleFetch]); err != nil || code != 0 {
+	code, err := l.wait(ctx, byRole[roleFetch])
+	if ctx.Err() != nil {
+		return
+	}
+	if err != nil || code != 0 {
 		l.log.Info("fetch exited without the work item; removing the sandbox", "session_id", session, "exit_code", code, "error", err)
 		l.remove(ctx, session, byRole)
 		return
@@ -137,7 +145,7 @@ const sidecarGrace = 15
 // sandbox's containers.
 func (l *Launcher) watchWorker(ctx context.Context, session ids.SessionID, byRole map[string]string) {
 	code, err := l.wait(ctx, byRole[roleWorker])
-	if err != nil {
+	if ctx.Err() != nil || err != nil {
 		return
 	}
 	l.log.Info("worker exited", "session_id", session, "exit_code", code)
