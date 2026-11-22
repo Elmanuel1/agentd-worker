@@ -1,0 +1,134 @@
+name: e2e
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.27.4"
+
+jobs:
+  e2e-docker:
+    # agentd's binary comes from its arm64 binaries workflow, so this job builds no Rust.
+    runs-on: ubuntu-24.04-arm
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: agentd
+          POSTGRES_PASSWORD: agentd
+          POSTGRES_DB: agentd
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U agentd"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+      localstack:
+        image: localstack/localstack:3.0
+        env:
+          SERVICES: s3,secretsmanager,kms
+        ports: ["4566:4566"]
+        options: >-
+          --health-cmd "curl -sf http://localhost:4566/_localstack/health"
+          --health-interval 2s --health-timeout 5s --health-retries 60
+    env:
+      DATABASE_URL: postgres://agentd:agentd@localhost:5432/agentd
+      AGENTD_AWS_ENDPOINT: http://localhost:4566
+      AGENTD_VALKEY_URL: redis://127.0.0.1:7001
+      AGENTD_VALKEY_CLUSTER: "1"
+      AGENTD_S3_CREATE_BUCKET: "1"
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+      AGENTD_ADDR: 0.0.0.0:8080
+      AGENTD_BASE_URL: http://127.0.0.1:8080
+      # The work secret's api_base_url, as sandboxes on the e2e network reach agentd.
+      AGENTD_API_BASE_URL: http://172.30.0.1:8080
+      AGENTD_MODELS: mock/scripted
+      AGENTD_MODEL_BASE_URL: http://127.0.0.1:18766/v1
+      AGENTD_TEST_ORG: org_e2e
+      AGENTD_TEST_WORKSPACE: wrkspc_e2e
+      AGENTD_BIN: ${{ github.workspace }}/agentd-bin/agentd
+      AGENTD_SANDBOX_IMAGE: agentd-sandbox:ci
+      AGENTD_TOOL_IMAGE: agentd-worker:ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Elmanuel1/agentd
+          path: agentd
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: agentd's binary from its latest arm64 build of main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=$(gh run list -R Elmanuel1/agentd -w "arm64 binaries" -b main -s success -L 1 --json databaseId -q '.[0].databaseId')
+          gh run download "$run" -R Elmanuel1/agentd -n agentd-linux-arm64 -D agentd-bin
+          tar -xzf agentd-bin/agentd-linux-arm64.tar.gz -C agentd-bin
+          echo "agentd from run $run of $(git -C agentd rev-parse --short HEAD)"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: image/controller/Dockerfile
+          load: true
+          tags: agentd-worker:ci
+          cache-from: type=gha,scope=controller-arm64
+          cache-to: type=gha,mode=max,scope=controller-arm64
+      - uses: docker/build-push-action@v6
+        with:
+          context: image/sandbox
+          load: true
+          tags: agentd-sandbox:ci
+      - name: Migrate the schema with Flyway
+        run: |
+          docker run --rm --network host -v "$PWD/agentd/crates/adapters/store-postgres/migrations:/flyway/sql" \
+            flyway/flyway:11 -url=jdbc:postgresql://localhost:5432/agentd -user=agentd -password=agentd \
+            -locations=filesystem:/flyway/sql -postgresql.transactional.lock=false migrate
+      - name: Start a one-node Valkey cluster and the change feed, as agentd's CI does
+        run: |
+          agentd/docker/valkey/start-cluster.sh 7001
+          agentd/docker/debezium/start-ci.sh "${{ job.services.postgres.id }}" redis localhost:7001 true
+      - name: Start the scripted model
+        run: nohup python3 agentd/conformance/mock_model.py --port 18766 --model mock/scripted e2e/model.json > model.log 2>&1 &
+      - name: Give agentd its keys, and make a workspace key
+        run: |
+          for var in AGENTD_API_KEY_PEPPERS AGENTD_WORK_TOKEN_KEYS AGENTD_PLACEHOLDER_KEYS AGENTD_SECRET_KEYS; do
+            ring="k1:$(openssl rand -hex 32)"
+            echo "::add-mask::$ring"
+            echo "$var=$ring" >> "$GITHUB_ENV"
+            export "$var=$ring"
+          done
+          echo "AGENTD_OPENROUTER_API_KEY=mock-model-key" >> "$GITHUB_ENV"
+          key=$("$AGENTD_BIN" keys create --org org_e2e --workspace wrkspc_e2e --name e2e)
+          echo "::add-mask::$key"
+          echo "AGENTD_TEST_KEY=$key" >> "$GITHUB_ENV"
+      - name: Start agentd
+        run: |
+          nohup "$AGENTD_BIN" > agentd.log 2>&1 &
+          for _ in $(seq 1 60); do curl -s -o /dev/null http://127.0.0.1:8080/ && exit 0; sleep 1; done
+          cat agentd.log; exit 1
+      - name: Sessions run in sandboxes the controller launches
+        run: e2e/docker.sh
+      - name: Logs
+        if: failure()
+        run: |
+          tail -200 agentd.log; tail -200 e2e/out/controller.log; tail -50 model.log
+          for c in $(docker ps -aq --filter label=agentd.session); do docker logs "$c" 2>&1 | tail -40; done
+
+  e2e-kind:
+    # Pending: the cloud e2e routes sandboxes through the iron-proxy extension, which another
+    # change builds. It runs once AGENTD_PROXY_READY is set on the repository.
+    if: ${{ vars.AGENTD_PROXY_READY == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: e2e/kind.sh

@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.27.4"
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      - run: go tool staticcheck ./...
+      - run: go tool govulncheck ./...
+      - run: go test -race ./...
+      - name: Every file is at most 200 lines
+        run: |
+          long=$(git ls-files | grep -v -e '^go.sum$' -e '\.lock\.hcl$' -e '^\.specs/' -e '^e2e/model.json$' \
+            | xargs wc -l | awk '$2 != "total" && $1 > 200')
+          test -z "$long" || { echo "$long"; exit 1; }
+      - name: The wrapper exports the secret's variables and sets the proxy only when built with one
+        run: sh image/sandbox/wrapper_test.sh
+
+  images:
+    runs-on: ubuntu-latest
+    env:
+      AGENTD_TEST_DOCKER: agentd-suite
+      AGENTD_TEST_SANDBOX_IMAGE: agentd-sandbox:ci
+      AGENTD_TEST_TOOL_IMAGE: agentd-worker:ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: image/controller/Dockerfile
+          load: true
+          tags: agentd-worker:ci
+          cache-from: type=gha,scope=controller
+          cache-to: type=gha,mode=max,scope=controller
+      - uses: docker/build-push-action@v6
+        with:
+          context: image/sandbox
+          load: true
+          tags: agentd-sandbox:ci
+      - name: The sandbox image is Anthropic's, pinned, plus the CA and the wrapper
+        run: image/sandbox/check.sh agentd-sandbox:ci
+      - name: The Docker adapter passes the launcher suite (runc stands in for runsc on the runner)
+        run: |
+          docker network create agentd-suite
+          go test -count=1 -v ./internal/launcher/docker/
+
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: anthropics/anthropic-cli
+          path: anthropic-cli
+          sparse-checkout: sandboxes/kubernetes
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.13.4"
+      - name: Terraform
+        working-directory: deploy/fargate
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate
+      - uses: azure/setup-helm@v4
+      - name: Our values pass the chart's closed schema
+        run: |
+          helm template cma anthropic-cli/sandboxes/kubernetes/chart -n cma -f deploy/eks/values.yaml \
+            --set image.registry=123456789012.dkr.ecr.us-east-1.amazonaws.com/cma \
+            --set egress.cmaServer.cidr=203.0.113.10/32 > /dev/null
+      - name: The manifests parse
+        run: python3 -c 'import sys, yaml; [list(yaml.safe_load_all(open(f))) for f in sys.argv[1:]]' deploy/eks/*.yaml
