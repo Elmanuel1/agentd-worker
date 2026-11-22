@@ -39,30 +39,17 @@ func (e *env) list(key string) []string {
 }
 
 func (e *env) seconds(key string, def int) time.Duration {
-	return time.Duration(e.number(key, def)) * time.Second
+	return time.Duration(e.number(key, def, 1)) * time.Second
 }
 
-func (e *env) number(key string, def int) int {
+func (e *env) number(key string, def, least int) int {
 	v := os.Getenv(key)
 	if v == "" {
 		return def
 	}
 	n, err := strconv.Atoi(v)
-	if err != nil || n <= 0 {
-		e.errs = append(e.errs, key+" must be a positive integer")
-	}
-	return n
-}
-
-// days reads a count of days, where zero, the default, turns the setting off.
-func (e *env) days(key string) int {
-	v := os.Getenv(key)
-	if v == "" {
-		return 0
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 0 {
-		e.errs = append(e.errs, key+" must be a whole number of days, 0 or more")
+	if err != nil || n < least {
+		e.errs = append(e.errs, fmt.Sprintf("%s must be a whole number of at least %d", key, least))
 	}
 	return n
 }

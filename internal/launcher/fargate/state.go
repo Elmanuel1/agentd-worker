@@ -19,7 +19,7 @@ import (
 
 // List returns each session with a task that should run or an access point tagged with it.
 func (l *Launcher) List(ctx context.Context) ([]dispatch.Sandbox, error) {
-	tasks, err := l.listTasks(ctx, "", "")
+	tasks, err := l.listTasks(ctx, "")
 	if err != nil {
 		return nil, err
 	}
@@ -44,21 +44,30 @@ func (l *Launcher) List(ctx context.Context) ([]dispatch.Sandbox, error) {
 }
 
 // Address is the task's private IP once it, or its fetch container, is RUNNING. A task still
-// starting runs without an address.
+// starting runs without an address. A known task costs one DescribeTasks call and no ListTasks.
 func (l *Launcher) Address(ctx context.Context, session ids.SessionID) (netip.Addr, bool, error) {
 	l.mu.Lock()
 	arn := l.tasks[session]
 	l.mu.Unlock()
-	tasks, err := l.listTasks(ctx, session, arn)
-	if err != nil || len(tasks) == 0 {
-		return netip.Addr{}, false, err
+	if arn == "" {
+		return addressOf(l.listTasks(ctx, session))
 	}
+	return addressOf(l.describeTasks(ctx, []string{arn}))
+}
+
+// addressOf reads the address from the tasks that should run; a stopped task, which DescribeTasks
+// still returns for a known ARN, is not running.
+func addressOf(tasks []ecstypes.Task, err error) (netip.Addr, bool, error) {
+	running := false
 	for _, t := range tasks {
+		if aws.ToString(t.DesiredStatus) != "RUNNING" {
+			continue
+		}
+		running = true
 		fetchRuns := slices.ContainsFunc(t.Containers, func(c ecstypes.Container) bool {
 			return aws.ToString(c.Name) == containerFetch && aws.ToString(c.LastStatus) == "RUNNING"
 		})
-		running := aws.ToString(t.DesiredStatus) == "RUNNING" && (aws.ToString(t.LastStatus) == "RUNNING" || fetchRuns)
-		if !running {
+		if aws.ToString(t.LastStatus) != "RUNNING" && !fetchRuns {
 			continue
 		}
 		for _, a := range t.Attachments {
@@ -70,14 +79,14 @@ func (l *Launcher) Address(ctx context.Context, session ids.SessionID) (netip.Ad
 			}
 		}
 	}
-	return netip.Addr{}, true, nil
+	return netip.Addr{}, running, err
 }
 
 func (l *Launcher) Stop(ctx context.Context, session ids.SessionID) error {
 	l.mu.Lock()
 	delete(l.tasks, session)
 	l.mu.Unlock()
-	tasks, err := l.listTasks(ctx, session, "")
+	tasks, err := l.listTasks(ctx, session)
 	if err != nil {
 		return err
 	}

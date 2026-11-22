@@ -35,9 +35,9 @@ func runScale(ctx context.Context, log *slog.Logger) error {
 	key := ids.NewSecret(e.required("ANTHROPIC_ENVIRONMENT_KEY"))
 	cfg := dispatch.Config{
 		HandoffWait:     e.seconds("AGENTD_HANDOFF_WAIT_SECONDS", 120),
-		MaxSandboxes:    e.number("AGENTD_MAX_SANDBOXES", 100),
+		MaxSandboxes:    e.number("AGENTD_MAX_SANDBOXES", 100, 1),
 		ReleaseInterval: e.seconds("AGENTD_RELEASE_INTERVAL_SECONDS", 600),
-		Retention:       time.Duration(e.days("AGENTD_RETENTION_DAYS")) * 24 * time.Hour,
+		Retention:       time.Duration(e.number("AGENTD_RETENTION_DAYS", 0, 0)) * 24 * time.Hour,
 	}
 	reapCfg := reapConfig(&e)
 	addr := e.str("AGENTD_HANDOFF_ADDR", ":8443")

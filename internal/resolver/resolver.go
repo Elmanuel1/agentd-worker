@@ -32,7 +32,8 @@ func Serve(ctx context.Context, addr, upstream string, log *slog.Logger) error {
 	defer wg.Wait()
 	stop := context.AfterFunc(ctx, func() { packets.Close(); streams.Close() })
 	defer stop()
-	wg.Go(func() { relayPackets(packets, upstream, log, &wg) })
+	slots := newLimit(inFlight, log)
+	wg.Go(func() { relayPackets(packets, upstream, slots, log, &wg) })
 	for {
 		conn, err := streams.Accept()
 		if errors.Is(err, net.ErrClosed) {
@@ -41,19 +42,30 @@ func Serve(ctx context.Context, addr, upstream string, log *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		wg.Go(func() { relayStream(conn, upstream, log) })
+		if !slots.take() {
+			conn.Close()
+			continue
+		}
+		wg.Go(func() {
+			defer slots.release()
+			relayStream(conn, upstream, log)
+		})
 	}
 }
 
-func relayPackets(packets net.PacketConn, upstream string, log *slog.Logger, wg *sync.WaitGroup) {
+func relayPackets(packets net.PacketConn, upstream string, slots *limit, log *slog.Logger, wg *sync.WaitGroup) {
 	buf := make([]byte, 65535)
 	for {
 		n, from, err := packets.ReadFrom(buf)
 		if err != nil {
 			return
 		}
+		if !slots.take() {
+			continue
+		}
 		query := append([]byte(nil), buf[:n]...)
 		wg.Go(func() {
+			defer slots.release()
 			answer, err := exchange(query, upstream)
 			if err != nil {
 				log.Debug("dns query failed", "error", err)

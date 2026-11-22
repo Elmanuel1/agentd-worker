@@ -35,14 +35,19 @@ type fakeQueue struct {
 	mu    sync.Mutex
 	polls int
 	acked []ids.WorkID
-	// failAcks fails that many acks before the next succeeds.
-	failAcks int
+	// failAcks and failPolls fail that many acks or polls before the next succeeds.
+	failAcks, failPolls int
 }
 
 func (q *fakeQueue) Poll(ctx context.Context, _ time.Duration) (Work, bool, error) {
 	q.mu.Lock()
 	q.polls++
+	fail := q.failPolls > 0
+	q.failPolls--
 	q.mu.Unlock()
+	if fail {
+		return Work{}, false, context.DeadlineExceeded
+	}
 	select {
 	case it := <-q.items:
 		return Work{ID: workOf(it.session), Session: it.session, Secret: it.secret}, true, nil

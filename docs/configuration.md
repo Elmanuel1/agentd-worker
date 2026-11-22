@@ -33,7 +33,13 @@ refuses to start when the engine lacks it) and the engine's own `DOCKER_HOST` an
 Under `runsc` a sandbox cannot reach the engine's embedded DNS, so the adapter runs
 `agentd-worker resolver`, a DNS relay, under `runc` on the sandbox network, and mounts a
 read-only `resolv.conf` naming it into each sandbox from `AGENTD_DOCKER_STATE_DIR` (default
-`/var/lib/agentd-worker`), a directory on the engine's host the controller can write.
+`/var/lib/agentd-worker`), a directory on the engine's host the controller can write. The relay
+runs as an unprivileged user with 64 MiB and 64 processes, relays at most 256 queries at once and
+drops the rest, and is replaced when `AGENTD_TOOL_IMAGE` changes.
+
+**Known gap: DNS.** The relay forwards any name to the engine's resolver, and a lookup can carry
+data in the name it asks for. Closing it takes a relay that answers only for agentd's, the
+controller's and the proxy's names.
 Anthropic's worker script refuses to run where the metadata address answers, so the host rejects
 it for containers: `iptables -I DOCKER-USER -d 169.254.0.0/16 -j REJECT`.
 

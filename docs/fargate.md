@@ -40,4 +40,6 @@ its client token, and a task-definition family `agentd-<session id>` that mounts
 fetch, then the worker once fetch succeeds, and a sidecar, on ARM64, with a task role that holds no
 permission. When the session is deleted or archived, or idle past `retention_days`, the
 controller deletes its access point, its directory and its family. The workspace mounts with the
-task role through its access point only; the file system's policy refuses any other client.
+task role through its access point: the file system's policy allows the sandbox's task role only
+through an access point. The controller mounts the file system's root through its own role's
+grant, to remove a released session's directory.

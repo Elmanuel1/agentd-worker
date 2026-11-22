@@ -2,7 +2,6 @@ package agentd
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"time"
 
@@ -18,12 +17,6 @@ const pageSize = 1000
 
 // errorText is the content of the error result posted for an owed call.
 const errorText = "The worker running this tool call stopped before it finished."
-
-// reapTypes are the only events the reaper reads, so a long session's history costs few pages.
-var reapTypes = []anthropic.BetaManagedAgentsSessionEventType{
-	reap.ToolUse, reap.ToolResult, reap.Confirmation, reap.Interrupt,
-	reap.ThreadTerminated, reap.SessionTerminated, reap.SessionDeleted,
-}
 
 // List returns one page of the environment's items.
 func (c *Client) List(ctx context.Context, cursor string) ([]reap.Item, string, error) {
@@ -64,20 +57,18 @@ func (e Events) List(ctx context.Context, session ids.SessionID) ([]reap.Event, 
 	pager := e.api.Beta.Sessions.Events.ListAutoPaging(ctx, string(session), anthropic.BetaSessionEventListParams{
 		Limit: param.NewOpt(int64(pageSize)),
 		Order: anthropic.BetaSessionEventListParamsOrderAsc,
-		Types: reapTypes,
+		// Only the events the reaper reads, so a long session's history costs few pages.
+		Types: []anthropic.BetaManagedAgentsSessionEventType{
+			reap.ToolUse, reap.ToolResult, reap.Confirmation, reap.Interrupt,
+			reap.ThreadTerminated, reap.SessionTerminated, reap.SessionDeleted,
+		},
 	})
 	var out []reap.Event
 	for pager.Next() {
 		ev := pager.Current()
-		var confirmation struct {
-			Result string `json:"result"`
-		}
-		if ev.Type == reap.Confirmation {
-			json.Unmarshal([]byte(ev.RawJSON()), &confirmation)
-		}
 		out = append(out, reap.Event{
 			Type: ev.Type, ID: ev.ID, ToolUseID: ev.ToolUseID, Permission: string(ev.EvaluatedPermission),
-			Thread: ev.SessionThreadID, At: ev.ProcessedAt, Verdict: confirmation.Result,
+			Thread: ev.SessionThreadID, At: ev.ProcessedAt, Verdict: string(ev.AsUserToolConfirmation().Result),
 		})
 	}
 	return out, wrap(pager.Err())

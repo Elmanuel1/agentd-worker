@@ -30,17 +30,13 @@ func (l *Launcher) accessPoint(ctx context.Context, session ids.SessionID) (stri
 		},
 		Tags: []efstypes.Tag{{Key: aws.String(tagSession), Value: aws.String(string(session))}},
 	})
-	exists, isExists := errors.AsType[*efstypes.AccessPointAlreadyExists](err)
-	if err != nil && !isExists {
+	if exists, ok := errors.AsType[*efstypes.AccessPointAlreadyExists](err); ok {
+		out, err = &efs.CreateAccessPointOutput{AccessPointId: exists.AccessPointId}, nil
+	}
+	if err != nil {
 		return "", fmt.Errorf("creating the access point: %w", err)
 	}
-	var id string
-	if isExists {
-		id = aws.ToString(exists.AccessPointId)
-	}
-	if !isExists {
-		id = aws.ToString(out.AccessPointId)
-	}
+	id := aws.ToString(out.AccessPointId)
 	deadline := time.Now().Add(accessPointWait)
 	for {
 		got, err := l.efs.DescribeAccessPoints(ctx, &efs.DescribeAccessPointsInput{AccessPointId: aws.String(id)})
