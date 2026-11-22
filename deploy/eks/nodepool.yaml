@@ -1,0 +1,83 @@
+# Karpenter nodes for sandboxes: Graviton, gVisor's runsc installed at boot, labelled and tainted as
+# the chart's RuntimeClass expects. The cluster's CNI is Cilium, so cilium-egress.yaml applies.
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: agentd-sandboxes
+spec:
+  template:
+    metadata:
+      labels:
+        cma.anthropic.com/sandbox-node: "true"
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: agentd-sandboxes
+      taints:
+        - key: cma.anthropic.com/sandbox-node
+          value: "true"
+          effect: NoSchedule
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["arm64"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand", "spot"]
+        - key: karpenter.k8s.aws/instance-category
+          operator: In
+          values: ["c", "m", "r"]
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 5m
+  limits:
+    cpu: "2000"
+---
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: agentd-sandboxes
+spec:
+  amiSelectorTerms:
+    - alias: al2023@latest
+  role: agentd-sandbox-nodes
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: agentd
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: agentd
+  metadataOptions:
+    httpTokens: required
+    httpPutResponseHopLimit: 1
+  userData: |
+    MIME-Version: 1.0
+    Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+    --BOUNDARY
+    Content-Type: text/x-shellscript; charset="us-ascii"
+
+    #!/bin/bash
+    set -euo pipefail
+    # gVisor's release, as gvisor.dev/docs/user_guide/install documents, checked against its sha512.
+    url=https://storage.googleapis.com/gvisor/releases/release/latest/$(uname -m)
+    cd /tmp
+    for f in runsc containerd-shim-runsc-v1; do
+      curl -fsSLO "$url/$f" -O "$url/$f.sha512"
+      sha512sum -c "$f.sha512"
+      install -m 0755 "$f" /usr/local/bin/
+    done
+
+    --BOUNDARY
+    Content-Type: application/node.eks.aws
+
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      containerd:
+        config: |
+          [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
+            runtime_type = "io.containerd.runsc.v1"
+
+    --BOUNDARY--

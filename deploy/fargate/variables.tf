@@ -1,0 +1,84 @@
+variable "region" {
+  type = string
+}
+
+variable "name" {
+  description = "Prefix of every resource."
+  type        = string
+  default     = "agentd-worker"
+}
+
+variable "vpc_id" {
+  type = string
+}
+
+variable "private_subnet_ids" {
+  description = "Subnets for the controller and the sandboxes, with no route to the internet."
+  type        = list(string)
+}
+
+variable "agentd_base_url" {
+  description = "agentd's API as the controller and sandboxes reach it."
+  type        = string
+}
+
+variable "agentd_cidr" {
+  description = "The addresses agentd answers on, the only API sandboxes may reach directly."
+  type        = string
+}
+
+variable "proxy_security_group_id" {
+  description = "The egress proxy's security group; sandboxes reach it on proxy_port."
+  type        = string
+}
+
+variable "proxy_port" {
+  type    = number
+  default = 3128
+}
+
+variable "environment_id" {
+  description = "The environment the controller serves, or runtime for agentd's runtime queue."
+  type        = string
+}
+
+variable "environment_key_secret_arn" {
+  description = "The Secrets Manager secret holding the environment key, or agentd's runtime key."
+  type        = string
+}
+
+variable "controller_image" {
+  description = "agentd-worker's image, by digest."
+  type        = string
+}
+
+variable "sandbox_image" {
+  description = "agentd's sandbox image, by digest."
+  type        = string
+}
+
+variable "max_sandboxes" {
+  type    = number
+  default = 100
+}
+
+variable "sandbox_cpu" {
+  type    = string
+  default = "512"
+}
+
+variable "sandbox_memory" {
+  type    = string
+  default = "1024"
+}
+
+variable "otel_exporter_otlp_endpoint" {
+  description = "Where the controller sends its metrics; empty sends none."
+  type        = string
+  default     = ""
+}
+
+variable "endpoints_security_group_id" {
+  description = "The security group of the VPC's interface endpoints for ECR and CloudWatch Logs."
+  type        = string
+}

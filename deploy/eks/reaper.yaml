@@ -1,0 +1,51 @@
+# The reaper for one environment: it stops a dead worker's item and answers its owed tool calls
+# with error results, as ant does on SIGTERM. One Deployment per environment, holding that
+# environment's key from the same Secret the chart's dispatcher reads.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentd-reaper
+  namespace: cma
+  labels:
+    app.kubernetes.io/name: agentd-reaper
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentd-reaper
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agentd-reaper
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reaper
+          image: agentd-worker
+          args: ["reap"]
+          envFrom:
+            - secretRef:
+                name: cma-environment
+          env:
+            - name: AGENTD_REAP_INTERVAL_SECONDS
+              value: "60"
+            - name: AGENTD_STALE_AFTER_SECONDS
+              value: "360"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
