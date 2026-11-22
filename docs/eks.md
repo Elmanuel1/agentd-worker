@@ -23,3 +23,7 @@ pointed at agentd. agentd-worker adds the sandbox image, the egress rules, the n
 
 The dispatcher, the reaper and, for the runtime key, the proxy are the only holders of a key. No
 sandbox holds one.
+
+**Known gap: DNS.** Sandboxes reach the cluster's DNS, which resolves any name, and a lookup can
+carry data in the name it asks for. Cilium's deny rules match addresses, not names, so they leave
+DNS open. Closing it takes a Cilium DNS policy that answers only for agentd's and the proxy's names.

@@ -17,6 +17,10 @@ Fargate task for it. `deploy/fargate` is the Terraform for one environment.
    EFS file system, the roles, the security groups, the handoff certificate and a private DNS name
    for it, and the controller service. Keep the state encrypted: it holds the handoff key.
 
+**Known gap: DNS.** A task reaches the VPC's DNS server, which security groups cannot filter, and
+a lookup can carry data in the name it asks for. Closing it takes Route 53 Resolver DNS Firewall on
+the VPC, allowing only agentd's, the proxy's and the controller's names.
+
 ## Quotas
 
 Request these before load, from Service Quotas:
