@@ -26,7 +26,6 @@ type Config struct {
 	ReleaseInterval time.Duration
 }
 
-// Controller is the poll loop and its handoffs.
 type Controller struct {
 	cfg      Config
 	queue    Queue
@@ -41,7 +40,6 @@ type Controller struct {
 	inflight map[ids.SessionID]bool
 }
 
-// New wires a controller. meter receives its metrics.
 func New(cfg Config, queue Queue, sessions Sessions, launcher Launcher, locator Locator, store *handoff.Store, meter metric.Meter, log *slog.Logger) (*Controller, error) {
 	if cfg.HandoffWait <= 0 || cfg.MaxSandboxes <= 0 || cfg.ReleaseInterval <= 0 {
 		return nil, errors.New("handoff wait, max sandboxes and release interval must be positive")
@@ -69,12 +67,19 @@ func (c *Controller) Run(ctx context.Context) error {
 			return nil
 		}
 		session, secret, ok, err := c.queue.Poll(ctx, 2*c.cfg.HandoffWait)
-		if !ok || err != nil {
+		if err != nil && ctx.Err() == nil {
 			<-slots
-			if err != nil && ctx.Err() == nil {
-				c.log.Warn("poll failed", "error", err)
-				pause(ctx, pollBackoff)
+			c.log.Warn("poll failed", "error", err)
+			backoff := time.NewTimer(pollBackoff)
+			select {
+			case <-backoff.C:
+			case <-ctx.Done():
+				backoff.Stop()
 			}
+			continue
+		}
+		if err != nil || !ok {
+			<-slots
 			continue
 		}
 		wg.Go(func() {
@@ -92,8 +97,22 @@ func (c *Controller) handle(ctx context.Context, polled Polled) {
 		return
 	}
 	defer c.end(session)
-	if _, running, err := c.locator.Address(ctx, session); err != nil || running {
-		c.recover(ctx, session, err)
+	_, running, err := c.locator.Address(ctx, session)
+	if err != nil {
+		c.log.Warn("finding the session's sandbox failed; leaving the item for redelivery", "session_id", session, "error", err)
+		return
+	}
+	// A sandbox that runs while this controller holds no nonce for it, as after a restart, is
+	// stopped and the item left unacked, so its next delivery launches afresh.
+	if running {
+		err = c.launcher.Stop(ctx, session)
+	}
+	if running && err != nil {
+		c.log.Warn("stopping a sandbox with no nonce failed", "session_id", session, "error", err)
+		return
+	}
+	if running {
+		c.log.Info("stopped a running sandbox this controller holds no nonce for", "session_id", session)
 		return
 	}
 	launched, err := polled.Launch(ctx, c.launcher, c.store)
@@ -103,11 +122,12 @@ func (c *Controller) handle(ctx context.Context, polled Polled) {
 	}
 	c.metrics.launches.Add(ctx, 1)
 	collected, err := launched.Collect(ctx, c.cfg.HandoffWait, c.store, c.launcher)
+	if errors.Is(err, ErrHandoffTimeout) {
+		c.metrics.timeouts.Add(context.WithoutCancel(ctx), 1)
+		c.log.Warn("sandbox did not collect its item; stopped it", "session_id", session, "error", err)
+		return
+	}
 	if err != nil {
-		if errors.Is(err, ErrHandoffTimeout) {
-			c.metrics.timeouts.Add(context.WithoutCancel(ctx), 1)
-			c.log.Warn("sandbox did not collect its item; stopped it", "session_id", session, "error", err)
-		}
 		return
 	}
 	c.metrics.collections.Add(context.WithoutCancel(ctx), 1)
@@ -117,20 +137,6 @@ func (c *Controller) handle(ctx context.Context, polled Polled) {
 		return
 	}
 	c.log.Info("work item handed over", "session_id", acked.Session())
-}
-
-// recover handles an item for a session whose sandbox runs with no nonce held here, as after a
-// restart: the sandbox is stopped and the item left unacked, so its next delivery launches afresh.
-func (c *Controller) recover(ctx context.Context, session ids.SessionID, lookup error) {
-	if lookup != nil {
-		c.log.Warn("finding the session's sandbox failed; leaving the item for redelivery", "session_id", session, "error", lookup)
-		return
-	}
-	if err := c.launcher.Stop(ctx, session); err != nil {
-		c.log.Warn("stopping a sandbox with no nonce failed", "session_id", session, "error", err)
-		return
-	}
-	c.log.Info("stopped a running sandbox this controller holds no nonce for", "session_id", session)
 }
 
 func (c *Controller) begin(session ids.SessionID) bool {
@@ -147,13 +153,4 @@ func (c *Controller) end(session ids.SessionID) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.inflight, session)
-}
-
-func pause(ctx context.Context, d time.Duration) {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-t.C:
-	case <-ctx.Done():
-	}
 }

@@ -12,10 +12,12 @@ import (
 	"log/slog"
 	"math/big"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
@@ -60,7 +62,14 @@ func newLauncher(t *testing.T, cfg Config) *Launcher {
 // TestSuite holds DK-1 and DK-3.
 func TestSuite(t *testing.T) {
 	cfg := config(t)
-	launchertest.Run(t, func(t *testing.T) launchertest.Subject { return newLauncher(t, cfg) })
+	launchertest.Run(t, func(t *testing.T) (launchertest.Subject, launchertest.Count) {
+		l := newLauncher(t, cfg)
+		count := func(ctx context.Context, s ids.SessionID) (int, error) {
+			cs, err := l.containers(ctx, s)
+			return len(slices.DeleteFunc(cs, func(c container.Summary) bool { return c.Labels[labelRole] != roleFetch })), err
+		}
+		return l, count
+	})
 }
 
 // TestRefusesWithoutRuntime holds DK-2.

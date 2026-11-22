@@ -17,7 +17,6 @@ var ErrNoToken = errors.New("work secret carries no sessions token")
 // Secret is a work item's secret payload, verbatim. It prints as [redacted].
 type Secret struct{ v string }
 
-// NewSecret wraps a secret read from the queue or a file.
 func NewSecret(v string) Secret { return Secret{v: v} }
 
 // Reveal returns the value, for the one place that must send it.

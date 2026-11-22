@@ -14,31 +14,27 @@ func (c *Controller) Release(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			c.releasePass(ctx)
 		}
-	}
-}
-
-func (c *Controller) releasePass(ctx context.Context) {
-	sandboxes, err := c.launcher.List(ctx)
-	if err != nil {
-		c.log.Warn("listing sandboxes failed", "error", err)
-		return
-	}
-	for _, sb := range sandboxes {
-		exists, err := c.sessions.Exists(ctx, sb.Session)
+		sandboxes, err := c.launcher.List(ctx)
 		if err != nil {
-			c.log.Warn("reading session failed; keeping its sandbox", "session_id", sb.Session, "error", err)
+			c.log.Warn("listing sandboxes failed", "error", err)
 			continue
 		}
-		if exists {
-			continue
+		for _, sb := range sandboxes {
+			exists, err := c.sessions.Exists(ctx, sb.Session)
+			if err != nil {
+				c.log.Warn("reading session failed; keeping its sandbox", "session_id", sb.Session, "error", err)
+				continue
+			}
+			if exists {
+				continue
+			}
+			if err := c.launcher.Release(ctx, sb.Session); err != nil {
+				c.log.Warn("release failed", "session_id", sb.Session, "error", err)
+				continue
+			}
+			c.metrics.releases.Add(ctx, 1)
+			c.log.Info("released the sandbox of a gone session", "session_id", sb.Session)
 		}
-		if err := c.launcher.Release(ctx, sb.Session); err != nil {
-			c.log.Warn("release failed", "session_id", sb.Session, "error", err)
-			continue
-		}
-		c.metrics.releases.Add(ctx, 1)
-		c.log.Info("released the sandbox of a gone session", "session_id", sb.Session)
 	}
 }

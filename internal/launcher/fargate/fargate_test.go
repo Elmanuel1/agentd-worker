@@ -26,9 +26,9 @@ var cfg = Config{
 
 // TestSuite holds FG-1 to FG-4 against the shared contract.
 func TestSuite(t *testing.T) {
-	launchertest.Run(t, func(*testing.T) launchertest.Subject {
+	launchertest.Run(t, func(*testing.T) (launchertest.Subject, launchertest.Count) {
 		f := newFake()
-		return New(f, f, f, cfg)
+		return New(f, f, f, cfg), f.running
 	})
 }
 
@@ -45,13 +45,21 @@ func TestLaunchAndRelease(t *testing.T) {
 	if defs := f.activeDefs(); len(defs) != 1 {
 		t.Errorf("registered %v, want one family revision", defs)
 	}
+	changed := cfg
+	changed.SandboxImage = "sandbox@sha256:3"
+	if err := New(f, f, f, changed).Launch(ctx, "sesn_1", "n3"); err != nil {
+		t.Fatal(err)
+	}
+	if defs := f.activeDefs(); len(defs) != 2 {
+		t.Errorf("a new image registered %v, want a second revision", defs)
+	}
 	ap := f.points["fsap-sesn_1"]
 	if aws.ToString(ap.Tags[0].Value) != "sesn_1" || aws.ToString(ap.RootDirectory.Path) != "/sessions/sesn_1" {
 		t.Errorf("access point %+v", ap)
 	}
-	run := f.runs[1]
+	run := f.runs[2]
 	env := run.Overrides.ContainerOverrides[0]
-	if aws.ToString(run.StartedBy) != "sesn_1" || aws.ToString(run.TaskDefinition) != "agentd-sesn_1" || aws.ToString(env.Name) != "fetch" || aws.ToString(env.Environment[0].Value) != "n2" {
+	if aws.ToString(run.StartedBy) != "sesn_1" || aws.ToString(run.TaskDefinition) != "agentd-sesn_1" || aws.ToString(env.Name) != "fetch" || aws.ToString(env.Environment[0].Value) != "n3" {
 		t.Errorf("RunTask %+v", run)
 	}
 	if err := l.Release(ctx, "sesn_1"); err != nil {

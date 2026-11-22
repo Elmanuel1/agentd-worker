@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
 
 	"github.com/Elmanuel1/agentd-worker/internal/dispatch/handoff"
@@ -150,11 +151,16 @@ type rig struct {
 
 func newRig(t *testing.T, cfg Config, sessions fakeSessions) *rig {
 	t.Helper()
+	return newMeteredRig(t, cfg, sessions, noop.Meter{})
+}
+
+func newMeteredRig(t *testing.T, cfg Config, sessions fakeSessions, meter metric.Meter) *rig {
+	t.Helper()
 	r := &rig{queue: &fakeQueue{items: make(chan item, 10)}, backend: newBackend()}
 	log := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	r.store = handoff.NewStore(r.backend)
 	r.server = handoff.NewServer(r.store, "env_1", "https://agentd.test", log).Handler()
-	ctrl, err := New(cfg, r.queue, sessions, r.backend, r.backend, r.store, noop.Meter{}, log)
+	ctrl, err := New(cfg, r.queue, sessions, r.backend, r.backend, r.store, meter, log)
 	if err != nil {
 		t.Fatal(err)
 	}

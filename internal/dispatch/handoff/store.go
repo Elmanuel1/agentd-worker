@@ -41,7 +41,6 @@ type Store struct {
 	open    map[ids.SessionID]*entry
 }
 
-// NewStore returns an empty store that checks callers through locator.
 func NewStore(locator Locator) *Store {
 	return &Store{locator: locator, open: map[ids.SessionID]*entry{}}
 }
@@ -54,14 +53,6 @@ func (s *Store) Open(session ids.SessionID, nonce ids.Nonce, secret ids.Secret) 
 	e := &entry{nonce: nonce, secret: secret, collected: make(chan struct{})}
 	s.open[session] = e
 	return e.collected
-}
-
-// Holds reports whether a nonce for session is waiting for collection.
-func (s *Store) Holds(session ids.SessionID) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.open[session]
-	return ok
 }
 
 // Drop forgets session's uncollected item and reports whether there was one. false after Open

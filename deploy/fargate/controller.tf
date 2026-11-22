@@ -27,7 +27,7 @@ locals {
     AGENTD_SECURITY_GROUPS      = aws_security_group.sandbox.id
     AGENTD_EFS_ID               = aws_efs_file_system.workspaces.id
     AGENTD_EFS_ROOT             = "/mnt/efs"
-    AGENTD_EXECUTION_ROLE_ARN   = aws_iam_role.execution.arn
+    AGENTD_EXECUTION_ROLE_ARN   = aws_iam_role.sandbox_execution.arn
     AGENTD_TASK_ROLE_ARN        = aws_iam_role.sandbox.arn
     AGENTD_TASK_CPU             = var.sandbox_cpu
     AGENTD_TASK_MEMORY          = var.sandbox_memory

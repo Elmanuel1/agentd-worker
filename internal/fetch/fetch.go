@@ -124,20 +124,17 @@ func write(cfg Config, it item) error {
 		{"base_url", it.BaseURL}, {"secret", it.Secret},
 	}
 	for _, f := range fields {
-		if err := writeFile(filepath.Join(dir, f[0]), f[1], cfg.UID, cfg.GID); err != nil {
+		path := filepath.Join(dir, f[0])
+		err := os.WriteFile(path+".tmp", []byte(f[1]), 0o600)
+		if err == nil {
+			err = os.Chown(path+".tmp", cfg.UID, cfg.GID)
+		}
+		if err == nil {
+			err = os.Rename(path+".tmp", path)
+		}
+		if err != nil {
 			return fmt.Errorf("writing %s: %w", f[0], err)
 		}
 	}
 	return nil
-}
-
-func writeFile(path, value string, uid, gid int) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(value), 0o600); err != nil {
-		return err
-	}
-	if err := os.Chown(tmp, uid, gid); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
 }

@@ -1,5 +1,6 @@
 output "cluster" {
-  value = aws_ecs_cluster.this.name
+  description = "The ECS cluster the controller and sandboxes run in."
+  value       = aws_ecs_cluster.this.name
 }
 
 output "sandbox_security_group_id" {
@@ -13,5 +14,6 @@ output "controller_security_group_id" {
 }
 
 output "workspaces_file_system_id" {
-  value = aws_efs_file_system.workspaces.id
+  description = "The EFS file system holding the sessions' workspaces."
+  value       = aws_efs_file_system.workspaces.id
 }

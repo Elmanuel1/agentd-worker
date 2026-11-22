@@ -68,7 +68,6 @@ type Collected struct {
 	session ids.SessionID
 }
 
-// Ack confirms the item to agentd.
 func (c Collected) Ack(ctx context.Context, queue Queue) (Acked, error) {
 	ackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ackTimeout)
 	defer cancel()
@@ -83,5 +82,4 @@ type Acked struct {
 	of Collected
 }
 
-// Session is the acked item's session.
 func (a Acked) Session() ids.SessionID { return a.of.session }

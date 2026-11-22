@@ -70,13 +70,11 @@ func (c *Client) Poll(ctx context.Context, reclaimAfter time.Duration) (ids.Sess
 	return session, ids.NewSecret(work.Secret), true, nil
 }
 
-// Ack confirms the session's item.
 func (c *Client) Ack(ctx context.Context, session ids.SessionID) error {
 	_, err := c.api.Beta.Environments.Work.Ack(ctx, string(session), anthropic.BetaEnvironmentWorkAckParams{EnvironmentID: string(c.env)})
 	return wrap(err)
 }
 
-// Depth is the queue's depth from work stats.
 func (c *Client) Depth(ctx context.Context) (int64, error) {
 	stats, err := c.api.Beta.Environments.Work.Stats(ctx, string(c.env), anthropic.BetaEnvironmentWorkStatsParams{})
 	if err != nil {
@@ -101,23 +99,19 @@ func (c *Client) Exists(ctx context.Context, session ids.SessionID) (bool, error
 	if err == nil {
 		return true, nil
 	}
-	if gone(err, session) {
-		return false, nil
-	}
-	return true, wrap(err)
-}
-
-func gone(err error, session ids.SessionID) bool {
 	apiErr, ok := errors.AsType[*anthropic.Error](err)
 	if !ok || apiErr.StatusCode != http.StatusNotFound || apiErr.Type() != anthropic.ErrorTypeNotFoundError {
-		return false
+		return true, wrap(err)
 	}
 	var body struct {
 		Error struct {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	return json.Unmarshal([]byte(apiErr.RawJSON()), &body) == nil && body.Error.Message == "Session not found: "+string(session)
+	if json.Unmarshal([]byte(apiErr.RawJSON()), &body) == nil && body.Error.Message == "Session not found: "+string(session) {
+		return false, nil
+	}
+	return true, wrap(err)
 }
 
 func wrap(err error) error {

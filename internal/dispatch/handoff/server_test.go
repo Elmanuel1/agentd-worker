@@ -55,13 +55,18 @@ func TestWorkItem(t *testing.T) {
 			if rec.Code != c.want {
 				t.Fatalf("status %d, want %d", rec.Code, c.want)
 			}
-			if spent := !store.Holds("sesn_1"); spent != c.spent {
-				t.Errorf("nonce spent %v, want %v", spent, c.spent)
-			}
 			if !c.spent {
+				if !store.Drop("sesn_1") {
+					t.Error("a refused request spent the nonce")
+				}
 				return
 			}
 			<-collected
+			again := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(again, req)
+			if again.Code != http.StatusForbidden {
+				t.Errorf("a spent nonce got %d", again.Code)
+			}
 			var got Item
 			if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 				t.Fatal(err)
@@ -80,7 +85,7 @@ func TestDropAfterCollectionReportsCollected(t *testing.T) {
 	if !store.Drop("sesn_1") {
 		t.Fatal("an uncollected item was not dropped")
 	}
-	if store.Drop("sesn_1") || store.Holds("sesn_1") {
+	if store.Drop("sesn_1") {
 		t.Error("a dropped item is still held")
 	}
 }

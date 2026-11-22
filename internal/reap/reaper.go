@@ -32,7 +32,6 @@ type Reaper struct {
 	retry map[ids.SessionID]bool
 }
 
-// New wires a reaper. meter receives its metrics.
 func New(cfg Config, items Items, events Events, meter metric.Meter, log *slog.Logger) (*Reaper, error) {
 	if cfg.Interval <= 0 || cfg.StaleAfter <= 0 {
 		return nil, errors.New("reap interval and stale-after must be positive")
@@ -91,7 +90,7 @@ func (r *Reaper) passAt(ctx context.Context, now time.Time) {
 func (r *Reaper) reap(ctx context.Context, now time.Time, it Item) {
 	var stopped Stopped
 	switch {
-	case r.stale(it, now):
+	case it.StaleAt(now, r.cfg.StaleAfter):
 		s, err := Stale{item: it}.Stop(ctx, r.items)
 		if err != nil {
 			r.fail(it, err)
@@ -114,11 +113,6 @@ func (r *Reaper) reap(ctx context.Context, now time.Time, it Item) {
 		r.results.Add(ctx, int64(answered.Calls()))
 		r.log.Info("answered a dead worker's item", "item_id", it.Session, "last_heartbeat", it.Beat, "calls_answered", answered.Calls())
 	}
-}
-
-func (r *Reaper) stale(it Item, now time.Time) bool {
-	live := it.State == StateActive || it.State == StateStarting
-	return live && !it.Beat.IsZero() && now.Sub(it.Beat) > r.cfg.StaleAfter
 }
 
 func (r *Reaper) fail(it Item, err error) {

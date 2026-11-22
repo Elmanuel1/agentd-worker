@@ -35,30 +35,57 @@ type Config struct {
 	HandoffWait           time.Duration
 }
 
-// Launcher runs sandboxes on one engine. Close waits for the launches it started.
+// Launcher runs sandboxes on one engine. Each sandbox has a watcher that starts its worker after
+// fetch and stops its sidecar after the worker; Close ends the watchers and waits for them, and
+// the next New adopts the sandboxes whose workers still run.
 type Launcher struct {
-	cli  *client.Client
-	cfg  Config
-	log  *slog.Logger
-	life context.Context
-	wg   sync.WaitGroup
+	cli *client.Client
+	cfg Config
+	log *slog.Logger
+	// watch is the watchers' context, cancelled by Close.
+	watch  context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
-// New checks the engine has cfg.Runtime. life bounds the goroutines that start each worker after
-// its fetch container exits 0.
-func New(life context.Context, cli *client.Client, cfg Config, log *slog.Logger) (*Launcher, error) {
-	info, err := cli.Info(life, client.InfoOptions{})
+// New checks the engine has cfg.Runtime and adopts the running workers of earlier launches.
+func New(ctx context.Context, cli *client.Client, cfg Config, log *slog.Logger) (*Launcher, error) {
+	info, err := cli.Info(ctx, client.InfoOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("reading the engine's runtimes: %w", err)
 	}
 	if _, ok := info.Info.Runtimes[cfg.Runtime]; !ok {
 		return nil, fmt.Errorf("%w %q; it has %v", ErrNoRuntime, cfg.Runtime, slices.Sorted(maps.Keys(info.Info.Runtimes)))
 	}
-	return &Launcher{cli: cli, cfg: cfg, log: log, life: life}, nil
+	watch, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	l := &Launcher{cli: cli, cfg: cfg, log: log, watch: watch, cancel: cancel}
+	containers, err := l.containers(ctx, "")
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	byRole := map[ids.SessionID]map[string]string{}
+	for _, c := range containers {
+		s := ids.SessionID(c.Labels[labelSession])
+		if byRole[s] == nil {
+			byRole[s] = map[string]string{}
+		}
+		byRole[s][c.Labels[labelRole]] = c.ID
+	}
+	for _, c := range containers {
+		if c.Labels[labelRole] != roleWorker || c.State != container.StateRunning {
+			continue
+		}
+		s := ids.SessionID(c.Labels[labelSession])
+		l.wg.Go(func() { l.watchWorker(watch, s, byRole[s]) })
+	}
+	return l, nil
 }
 
-// Close waits for the worker starts under way.
-func (l *Launcher) Close() { l.wg.Wait() }
+func (l *Launcher) Close() {
+	l.cancel()
+	l.wg.Wait()
+}
 
 // Launch replaces whatever containers the session had with a fresh sandbox on its kept volume.
 func (l *Launcher) Launch(ctx context.Context, session ids.SessionID, nonce ids.Nonce) error {
@@ -83,40 +110,46 @@ func (l *Launcher) Launch(ctx context.Context, session ids.SessionID, nonce ids.
 			return errors.Join(fmt.Errorf("starting %s: %w", role, err), l.Stop(context.WithoutCancel(ctx), session))
 		}
 	}
-	l.wg.Go(func() { l.startWorker(session, created) })
+	l.wg.Go(func() { l.startWorker(l.watch, session, created) })
 	return nil
 }
 
-// startWorker starts the worker once fetch exits 0. When the worker exits it stops the sidecar,
-// which stops the item, then removes the containers; a fetch that fails removes them at once.
-func (l *Launcher) startWorker(session ids.SessionID, byRole map[string]string) {
-	if code, err := l.wait(byRole[roleFetch]); err != nil || code != 0 {
+// startWorker starts the worker once fetch exits 0, then watches it; a fetch that fails removes
+// the sandbox at once.
+func (l *Launcher) startWorker(ctx context.Context, session ids.SessionID, byRole map[string]string) {
+	if code, err := l.wait(ctx, byRole[roleFetch]); err != nil || code != 0 {
 		l.log.Info("fetch exited without the work item; removing the sandbox", "session_id", session, "exit_code", code, "error", err)
-		l.remove(session, byRole)
+		l.remove(ctx, session, byRole)
 		return
 	}
-	if _, err := l.cli.ContainerStart(l.life, byRole[roleWorker], client.ContainerStartOptions{}); err != nil {
+	if _, err := l.cli.ContainerStart(ctx, byRole[roleWorker], client.ContainerStartOptions{}); err != nil {
 		l.log.Warn("starting the worker failed", "session_id", session, "error", err)
-		l.remove(session, byRole)
+		l.remove(ctx, session, byRole)
 		return
 	}
-	code, err := l.wait(byRole[roleWorker])
-	if err != nil {
-		return
-	}
-	l.log.Info("worker exited", "session_id", session, "exit_code", code)
-	timeout := sidecarGrace
-	if _, err := l.cli.ContainerStop(l.life, byRole[roleSidecar], client.ContainerStopOptions{Timeout: &timeout}); err != nil && !cerrdefs.IsNotFound(err) {
-		l.log.Warn("stopping the sidecar failed", "session_id", session, "error", err)
-	}
-	l.remove(session, byRole)
+	l.watchWorker(ctx, session, byRole)
 }
 
 // sidecarGrace is the seconds the sidecar gets to stop the item.
 const sidecarGrace = 15
 
-func (l *Launcher) wait(id string) (int64, error) {
-	wait := l.cli.ContainerWait(l.life, id, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
+// watchWorker stops the sidecar when the worker exits, so it stops the item, then removes the
+// sandbox's containers.
+func (l *Launcher) watchWorker(ctx context.Context, session ids.SessionID, byRole map[string]string) {
+	code, err := l.wait(ctx, byRole[roleWorker])
+	if err != nil {
+		return
+	}
+	l.log.Info("worker exited", "session_id", session, "exit_code", code)
+	timeout := sidecarGrace
+	if _, err := l.cli.ContainerStop(ctx, byRole[roleSidecar], client.ContainerStopOptions{Timeout: &timeout}); err != nil && !cerrdefs.IsNotFound(err) {
+		l.log.Warn("stopping the sidecar failed", "session_id", session, "error", err)
+	}
+	l.remove(ctx, session, byRole)
+}
+
+func (l *Launcher) wait(ctx context.Context, id string) (int64, error) {
+	wait := l.cli.ContainerWait(ctx, id, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
 	select {
 	case res := <-wait.Result:
 		return res.StatusCode, nil
@@ -127,9 +160,9 @@ func (l *Launcher) wait(id string) (int64, error) {
 
 // remove removes this launch's containers only: a later Launch may already have replaced them.
 // The work-item volume stays until the session's next Launch or Stop.
-func (l *Launcher) remove(session ids.SessionID, byRole map[string]string) {
+func (l *Launcher) remove(ctx context.Context, session ids.SessionID, byRole map[string]string) {
 	for _, id := range byRole {
-		_, err := l.cli.ContainerRemove(l.life, id, client.ContainerRemoveOptions{Force: true})
+		_, err := l.cli.ContainerRemove(ctx, id, client.ContainerRemoveOptions{Force: true})
 		if err != nil && !cerrdefs.IsNotFound(err) {
 			l.log.Warn("removing a sandbox container failed", "session_id", session, "error", err)
 		}

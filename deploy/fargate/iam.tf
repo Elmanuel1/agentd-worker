@@ -8,7 +8,7 @@ data "aws_iam_policy_document" "ecs_tasks" {
   }
 }
 
-# Pulls images and writes logs for both the controller and the sandboxes.
+# Pulls the controller's image, writes its logs and reads its two secrets.
 resource "aws_iam_role" "execution" {
   name               = "${var.name}-execution"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks.json
@@ -30,6 +30,17 @@ resource "aws_iam_role_policy" "execution_secret" {
       Resource = [var.environment_key_secret_arn, aws_secretsmanager_secret.handoff_key.arn]
     }]
   })
+}
+
+# Pulls a sandbox's images and writes its logs, and reads no secret.
+resource "aws_iam_role" "sandbox_execution" {
+  name               = "${var.name}-sandbox-execution"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks.json
+}
+
+resource "aws_iam_role_policy_attachment" "sandbox_execution" {
+  role       = aws_iam_role.sandbox_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
 # The sandbox task's role holds no permission: a tool call that reaches the task's credentials
@@ -70,7 +81,7 @@ data "aws_iam_policy_document" "controller" {
   statement {
     sid       = "PassRoles"
     actions   = ["iam:PassRole"]
-    resources = [aws_iam_role.execution.arn, aws_iam_role.sandbox.arn]
+    resources = [aws_iam_role.sandbox_execution.arn, aws_iam_role.sandbox.arn]
   }
   statement {
     sid       = "AccessPoints"

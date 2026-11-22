@@ -17,11 +17,15 @@ environment or runtime key, no host path, no host namespace, no added capability
 credential that grants anything.
 
 Then pass the shared suite, `internal/launcher/launchertest`, against the backend or a faithful
-fake of its API:
+fake of its API. The suite also takes a `Count` that reads, from the backend itself, how many
+sandboxes it holds for a session, so a second sandbox that `List` would fold into one still shows:
 
 ```go
 func TestSuite(t *testing.T) {
-	launchertest.Run(t, func(t *testing.T) launchertest.Subject { return mybackend.New(...) })
+	launchertest.Run(t, func(t *testing.T) (launchertest.Subject, launchertest.Count) {
+		b := mybackend.New(...)
+		return b, func(ctx context.Context, s ids.SessionID) (int, error) { return countTasks(ctx, s) }
+	})
 }
 ```
 

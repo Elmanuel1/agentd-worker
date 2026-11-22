@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
@@ -55,7 +56,8 @@ func (s *Server) workItem(w http.ResponseWriter, r *http.Request) {
 	}
 	session, e, err := s.authorize(r)
 	if err != nil {
-		s.refuse(w, r, err)
+		s.log.Info("work item refused", "remote", r.RemoteAddr, "reason", err.Error())
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 	item := Item{SessionID: session, WorkID: session, EnvironmentID: s.env, BaseURL: s.baseURL, Secret: e.secret.Reveal()}
@@ -80,12 +82,14 @@ func (s *Server) authorize(r *http.Request) (ids.SessionID, *entry, error) {
 		return "", nil, err
 	}
 	addr, running, err := s.store.locator.Address(r.Context(), session)
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	peer, peerErr := netip.ParseAddr(host)
 	switch {
 	case err != nil:
 		err = errors.Join(ErrNotRunning, err)
 	case !running:
 		err = ErrNotRunning
-	case !sameAddr(r.RemoteAddr, addr):
+	case peerErr != nil || peer.Unmap() != addr.Unmap():
 		err = ErrWrongSource
 	}
 	if err != nil {
@@ -93,20 +97,6 @@ func (s *Server) authorize(r *http.Request) (ids.SessionID, *entry, error) {
 		return "", nil, err
 	}
 	return session, e, nil
-}
-
-func (s *Server) refuse(w http.ResponseWriter, r *http.Request, err error) {
-	s.log.Info("work item refused", "remote", r.RemoteAddr, "reason", err.Error())
-	http.Error(w, "forbidden", http.StatusForbidden)
-}
-
-func sameAddr(remote string, want netip.Addr) bool {
-	host, _, err := net.SplitHostPort(remote)
-	if err != nil {
-		return false
-	}
-	got, err := netip.ParseAddr(host)
-	return err == nil && got.Unmap() == want.Unmap()
 }
 
 // Serve serves handler over TLS 1.2 or later until ctx ends, then lets requests in flight finish.
@@ -120,7 +110,9 @@ func Serve(ctx context.Context, addr string, cert tls.Certificate, handler http.
 		IdleTimeout:       60 * time.Second,
 	}
 	errc := make(chan error, 1)
-	go func() { errc <- srv.ListenAndServeTLS("", "") }()
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Go(func() { errc <- srv.ListenAndServeTLS("", "") })
 	select {
 	case err := <-errc:
 		return err

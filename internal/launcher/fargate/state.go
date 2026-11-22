@@ -52,7 +52,10 @@ func (l *Launcher) Address(ctx context.Context, session ids.SessionID) (netip.Ad
 		return netip.Addr{}, false, err
 	}
 	for _, t := range tasks {
-		if !fetchRuns(t) {
+		running := aws.ToString(t.LastStatus) == "RUNNING" || slices.ContainsFunc(t.Containers, func(c ecstypes.Container) bool {
+			return aws.ToString(c.Name) == containerFetch && aws.ToString(c.LastStatus) == "RUNNING"
+		})
+		if !running {
 			continue
 		}
 		for _, a := range t.Attachments {
@@ -67,19 +70,6 @@ func (l *Launcher) Address(ctx context.Context, session ids.SessionID) (netip.Ad
 	return netip.Addr{}, true, nil
 }
 
-func fetchRuns(t ecstypes.Task) bool {
-	if aws.ToString(t.LastStatus) == "RUNNING" {
-		return true
-	}
-	for _, c := range t.Containers {
-		if aws.ToString(c.Name) == containerFetch && aws.ToString(c.LastStatus) == "RUNNING" {
-			return true
-		}
-	}
-	return false
-}
-
-// Stop stops the session's tasks.
 func (l *Launcher) Stop(ctx context.Context, session ids.SessionID) error {
 	tasks, err := l.tasks(ctx, session)
 	if err != nil {

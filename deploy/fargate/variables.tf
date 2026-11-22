@@ -1,5 +1,6 @@
 variable "region" {
-  type = string
+  description = "The AWS region to deploy in."
+  type        = string
 }
 
 variable "name" {
@@ -9,7 +10,8 @@ variable "name" {
 }
 
 variable "vpc_id" {
-  type = string
+  description = "The VPC the controller, the sandboxes and EFS run in."
+  type        = string
 }
 
 variable "private_subnet_ids" {
@@ -33,8 +35,9 @@ variable "proxy_security_group_id" {
 }
 
 variable "proxy_port" {
-  type    = number
-  default = 3128
+  description = "The egress proxy's port."
+  type        = number
+  default     = 3128
 }
 
 variable "environment_id" {
@@ -58,18 +61,21 @@ variable "sandbox_image" {
 }
 
 variable "max_sandboxes" {
-  type    = number
-  default = 100
+  description = "Items the controller handles at once."
+  type        = number
+  default     = 100
 }
 
 variable "sandbox_cpu" {
-  type    = string
-  default = "512"
+  description = "A sandbox task's CPU units."
+  type        = string
+  default     = "512"
 }
 
 variable "sandbox_memory" {
-  type    = string
-  default = "1024"
+  description = "A sandbox task's memory in MiB."
+  type        = string
+  default     = "1024"
 }
 
 variable "otel_exporter_otlp_endpoint" {

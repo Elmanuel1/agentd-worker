@@ -13,6 +13,8 @@ import (
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 	"github.com/aws/aws-sdk-go-v2/service/efs"
 	efstypes "github.com/aws/aws-sdk-go-v2/service/efs/types"
+
+	"github.com/Elmanuel1/agentd-worker/internal/ids"
 )
 
 // fakeAWS is ECS, EFS and the EFS root in memory: a task runs as soon as it starts.
@@ -21,13 +23,14 @@ type fakeAWS struct {
 	n       int
 	tasks   map[string]*ecstypes.Task
 	defs    map[string]string // ARN -> ACTIVE or INACTIVE
+	tags    map[string][]ecstypes.Tag
 	points  map[string]efstypes.AccessPointDescription
 	removed []string
 	runs    []*ecs.RunTaskInput
 }
 
 func newFake() *fakeAWS {
-	return &fakeAWS{tasks: map[string]*ecstypes.Task{}, defs: map[string]string{}, points: map[string]efstypes.AccessPointDescription{}}
+	return &fakeAWS{tasks: map[string]*ecstypes.Task{}, defs: map[string]string{}, tags: map[string][]ecstypes.Tag{}, points: map[string]efstypes.AccessPointDescription{}}
 }
 
 func (f *fakeAWS) RunTask(_ context.Context, in *ecs.RunTaskInput, _ ...func(*ecs.Options)) (*ecs.RunTaskOutput, error) {
@@ -75,17 +78,24 @@ func (f *fakeAWS) DescribeTasks(_ context.Context, in *ecs.DescribeTasksInput, _
 func (f *fakeAWS) RegisterTaskDefinition(_ context.Context, in *ecs.RegisterTaskDefinitionInput, _ ...func(*ecs.Options)) (*ecs.RegisterTaskDefinitionOutput, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.defs[fmt.Sprintf("arn:aws:ecs:r:1:task-definition/%s:%d", aws.ToString(in.Family), len(f.defs)+1)] = "ACTIVE"
+	f.n++
+	arn := fmt.Sprintf("arn:aws:ecs:r:1:task-definition/%s:%d", aws.ToString(in.Family), f.n)
+	f.defs[arn] = "ACTIVE"
+	f.tags[arn] = in.Tags
 	return &ecs.RegisterTaskDefinitionOutput{}, nil
 }
 
 func (f *fakeAWS) DescribeTaskDefinition(_ context.Context, in *ecs.DescribeTaskDefinitionInput, _ ...func(*ecs.Options)) (*ecs.DescribeTaskDefinitionOutput, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	latest := ""
 	for arn, status := range f.defs {
-		if status == "ACTIVE" && strings.HasPrefix(path.Base(arn), aws.ToString(in.TaskDefinition)+":") {
-			return &ecs.DescribeTaskDefinitionOutput{}, nil
+		if status == "ACTIVE" && strings.HasPrefix(path.Base(arn), aws.ToString(in.TaskDefinition)+":") && arn > latest {
+			latest = arn
 		}
+	}
+	if latest != "" {
+		return &ecs.DescribeTaskDefinitionOutput{Tags: f.tags[latest]}, nil
 	}
 	return nil, &ecstypes.ClientException{Message: aws.String("Unable to describe task definition.")}
 }
@@ -162,4 +172,16 @@ func (f *fakeAWS) activeDefs() []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+func (f *fakeAWS) running(_ context.Context, s ids.SessionID) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, t := range f.tasks {
+		if aws.ToString(t.StartedBy) == string(s) && aws.ToString(t.DesiredStatus) == "RUNNING" {
+			n++
+		}
+	}
+	return n, nil
 }

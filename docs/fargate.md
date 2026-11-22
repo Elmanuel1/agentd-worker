@@ -6,7 +6,9 @@ Fargate task for it. `deploy/fargate` is the Terraform for one environment.
 1. **Network.** A VPC with private subnets, interface endpoints for ECR (`ecr.api`, `ecr.dkr`) and
    CloudWatch Logs, and an S3 gateway endpoint. Sandboxes have no route to the internet: their
    security group allows outbound only to the proxy, agentd, the controller's handoff port, EFS and
-   those endpoints.
+   those endpoints. S3's prefix list covers every bucket in the region, so the gateway endpoint's
+   policy must allow only ECR's layer bucket, `arn:aws:s3:::prod-<region>-starport-layer-bucket/*`;
+   a Terraform check fails the plan when it allows more.
 2. **Images.** Push agentd-worker's image (`image/controller`) and the sandbox image
    (`image/sandbox`, built with the proxy for our cloud) to ECR, and pass both by digest.
 3. **Key.** Store the environment key, or agentd's runtime key with `environment_id = "runtime"`,

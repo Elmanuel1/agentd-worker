@@ -33,10 +33,11 @@ func (s Stopped) Answer(ctx context.Context, events Events) (Answered, error) {
 		return Answered{}, fmt.Errorf("listing events of %s: %w", s.item.Session, err)
 	}
 	calls := owed(log)
-	if len(calls) > 0 {
-		if err := events.Send(ctx, s.item.Session, calls); err != nil {
-			return Answered{}, fmt.Errorf("answering %d calls of %s: %w", len(calls), s.item.Session, err)
-		}
+	if len(calls) == 0 {
+		return Answered{of: s}, nil
+	}
+	if err := events.Send(ctx, s.item.Session, calls); err != nil {
+		return Answered{}, fmt.Errorf("answering %d calls of %s: %w", len(calls), s.item.Session, err)
 	}
 	return Answered{of: s, calls: len(calls)}, nil
 }
@@ -47,10 +48,8 @@ type Answered struct {
 	calls int
 }
 
-// Calls is the number of error results posted.
 func (a Answered) Calls() int { return a.calls }
 
-// Reaped reports whether this pass stopped the item.
 func (a Answered) Reaped() bool { return a.of.reaped }
 
 // owed returns the tool calls with no result after them, in order. A session that ended owes nothing.

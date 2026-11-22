@@ -60,14 +60,15 @@ spec:
 
     #!/bin/bash
     set -euo pipefail
-    # gVisor's release, as gvisor.dev/docs/user_guide/install documents, checked against its sha512.
-    url=https://storage.googleapis.com/gvisor/releases/release/latest/$(uname -m)
+    # gVisor release 20261116 for arm64, checked against the sha512 read from its release on 2026-11-22.
+    # Bump the release and the digest together.
+    release=20261116
+    sha512=a64ce2d5ba6825a0a6459ee6a9ce40164749c2d276a945b885673988c4e545e66b2f4ef3a08e068a26cca676061c8c5e8ba982156feb786f0eab995f5b8b854d
     cd /tmp
-    for f in runsc containerd-shim-runsc-v1; do
-      curl -fsSLO "$url/$f" -O "$url/$f.sha512"
-      sha512sum -c "$f.sha512"
-      install -m 0755 "$f" /usr/local/bin/
-    done
+    curl -fsSLo gvisor.tar.bz2 "https://storage.googleapis.com/gvisor/releases/release/$release/aarch64/gvisor.tar.bz2"
+    echo "$sha512  gvisor.tar.bz2" | sha512sum -c -
+    tar -xjf gvisor.tar.bz2 runsc containerd-shim-runsc-v1
+    install -m 0755 runsc containerd-shim-runsc-v1 /usr/local/bin/
 
     --BOUNDARY
     Content-Type: application/node.eks.aws

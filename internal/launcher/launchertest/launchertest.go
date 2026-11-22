@@ -19,11 +19,15 @@ type Subject interface {
 	dispatch.Locator
 }
 
+// Count reports how many sandboxes the backend holds for the session, read from the backend
+// itself, so a second sandbox the adapter's List would fold into one still shows.
+type Count func(ctx context.Context, s ids.SessionID) (int, error)
+
 // Run runs the suite against the adapters newSubject builds, one per case.
-func Run(t *testing.T, newSubject func(t *testing.T) Subject) {
+func Run(t *testing.T, newSubject func(t *testing.T) (Subject, Count)) {
 	cases := []struct {
 		name string
-		run  func(t *testing.T, ctx context.Context, l Subject, s ids.SessionID)
+		run  func(t *testing.T, ctx context.Context, l Subject, count Count, s ids.SessionID)
 	}{
 		{"launch runs the sandbox", launchRuns},
 		{"launch twice keeps one sandbox", launchTwice},
@@ -35,15 +39,15 @@ func Run(t *testing.T, newSubject func(t *testing.T) Subject) {
 		t.Run(c.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 			defer cancel()
-			l := newSubject(t)
+			l, count := newSubject(t)
 			s := ids.SessionID(fmt.Sprintf("sesn_lt%d_%d", time.Now().UnixNano()%1e9, i))
 			t.Cleanup(func() { l.Release(context.WithoutCancel(ctx), s) })
-			c.run(t, ctx, l, s)
+			c.run(t, ctx, l, count, s)
 		})
 	}
 }
 
-func launchRuns(t *testing.T, ctx context.Context, l Subject, s ids.SessionID) {
+func launchRuns(t *testing.T, ctx context.Context, l Subject, _ Count, s ids.SessionID) {
 	must(t, l.Launch(ctx, s, ids.NewNonce()))
 	addr := waitRunning(t, ctx, l, s, true)
 	if !addr.IsValid() {
@@ -54,10 +58,15 @@ func launchRuns(t *testing.T, ctx context.Context, l Subject, s ids.SessionID) {
 	}
 }
 
-func launchTwice(t *testing.T, ctx context.Context, l Subject, s ids.SessionID) {
+func launchTwice(t *testing.T, ctx context.Context, l Subject, count Count, s ids.SessionID) {
 	must(t, l.Launch(ctx, s, ids.NewNonce()))
 	must(t, l.Launch(ctx, s, ids.NewNonce()))
 	waitRunning(t, ctx, l, s, true)
+	n, err := count(ctx, s)
+	must(t, err)
+	if n != 1 {
+		t.Errorf("the backend holds %d sandboxes for the session, want 1", n)
+	}
 	all, err := l.List(ctx)
 	must(t, err)
 	if n := len(slices.DeleteFunc(all, func(sb dispatch.Sandbox) bool { return sb.Session != s })); n != 1 {
@@ -65,7 +74,7 @@ func launchTwice(t *testing.T, ctx context.Context, l Subject, s ids.SessionID) 
 	}
 }
 
-func stopKeeps(t *testing.T, ctx context.Context, l Subject, s ids.SessionID) {
+func stopKeeps(t *testing.T, ctx context.Context, l Subject, _ Count, s ids.SessionID) {
 	must(t, l.Launch(ctx, s, ids.NewNonce()))
 	waitRunning(t, ctx, l, s, true)
 	must(t, l.Stop(ctx, s))
@@ -76,7 +85,7 @@ func stopKeeps(t *testing.T, ctx context.Context, l Subject, s ids.SessionID) {
 	}
 }
 
-func releaseForgets(t *testing.T, ctx context.Context, l Subject, s ids.SessionID) {
+func releaseForgets(t *testing.T, ctx context.Context, l Subject, _ Count, s ids.SessionID) {
 	must(t, l.Launch(ctx, s, ids.NewNonce()))
 	waitRunning(t, ctx, l, s, true)
 	must(t, l.Release(ctx, s))
@@ -86,7 +95,7 @@ func releaseForgets(t *testing.T, ctx context.Context, l Subject, s ids.SessionI
 	}
 }
 
-func unknownSafe(t *testing.T, ctx context.Context, l Subject, s ids.SessionID) {
+func unknownSafe(t *testing.T, ctx context.Context, l Subject, _ Count, s ids.SessionID) {
 	must(t, l.Stop(ctx, s))
 	must(t, l.Release(ctx, s))
 	if _, running, err := l.Address(ctx, s); err != nil || running {

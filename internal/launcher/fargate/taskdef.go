@@ -42,8 +42,12 @@ func (l *Launcher) taskDefinition(session ids.SessionID, accessPoint string) *ec
 		ContainerDefinitions: []types.ContainerDefinition{
 			{
 				Name: aws.String(containerFetch), Image: aws.String(l.cfg.ToolImage), Command: []string{"fetch"}, User: aws.String("0"),
-				Essential:        aws.Bool(false),
-				Environment:      l.handoffEnv(),
+				Essential: aws.Bool(false),
+				Environment: []types.KeyValuePair{
+					{Name: aws.String("AGENTD_HANDOFF_URL"), Value: aws.String(l.cfg.HandoffURL)},
+					{Name: aws.String("AGENTD_HANDOFF_CA"), Value: aws.String(l.cfg.HandoffCA)},
+					{Name: aws.String("AGENTD_HANDOFF_WAIT"), Value: aws.String(l.cfg.HandoffWait.String())},
+				},
 				MountPoints:      []types.MountPoint{run},
 				LogConfiguration: l.logs(containerFetch),
 			},
@@ -60,14 +64,6 @@ func (l *Launcher) taskDefinition(session ids.SessionID, accessPoint string) *ec
 				LogConfiguration: l.logs(containerSidecar),
 			},
 		},
-	}
-}
-
-func (l *Launcher) handoffEnv() []types.KeyValuePair {
-	return []types.KeyValuePair{
-		{Name: aws.String("AGENTD_HANDOFF_URL"), Value: aws.String(l.cfg.HandoffURL)},
-		{Name: aws.String("AGENTD_HANDOFF_CA"), Value: aws.String(l.cfg.HandoffCA)},
-		{Name: aws.String("AGENTD_HANDOFF_WAIT"), Value: aws.String(l.cfg.HandoffWait.String())},
 	}
 }
 

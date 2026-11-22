@@ -47,7 +47,6 @@ type Events struct {
 	api anthropic.Client
 }
 
-// Events returns the event routes.
 func (c *Client) Events() Events { return Events{api: c.api} }
 
 // List returns every event of the session, oldest first.

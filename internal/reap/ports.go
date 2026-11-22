@@ -33,6 +33,12 @@ type Item struct {
 	StoppedAt time.Time
 }
 
+// StaleAt reports whether, at now, a worker holds the item and has not beaten for longer than after.
+func (i Item) StaleAt(now time.Time, after time.Duration) bool {
+	live := i.State == StateActive || i.State == StateStarting
+	return live && !i.Beat.IsZero() && now.Sub(i.Beat) > after
+}
+
 // Event is one session event.
 type Event struct {
 	Type      string

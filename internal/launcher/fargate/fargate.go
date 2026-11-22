@@ -5,8 +5,12 @@ package fargate
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,8 +23,12 @@ import (
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
 )
 
-// tagSession tags each access point with its session.
-const tagSession = "agentd:session"
+const (
+	// tagSession tags each access point with its session.
+	tagSession = "agentd:session"
+	// tagConfig tags each family revision with a digest of the config it was made from.
+	tagConfig = "agentd:config"
+)
 
 // ECS holds the ECS calls the adapter makes.
 type ECS interface {
@@ -71,7 +79,6 @@ type Launcher struct {
 	cfg  Config
 }
 
-// New wires the adapter.
 func New(ecsClient ECS, efsClient EFS, dirs Dirs, cfg Config) *Launcher {
 	return &Launcher{ecs: ecsClient, efs: efsClient, dirs: dirs, cfg: cfg}
 }
@@ -80,9 +87,13 @@ func family(s ids.SessionID) string { return "agentd-" + string(s) }
 
 func sessionDir(s ids.SessionID) string { return "/sessions/" + string(s) }
 
-// Launch creates the session's access point and family when it has none, then runs its task with
-// the nonce in the fetch container's environment.
+// Launch stops the session's earlier tasks, creates its access point when it has none, registers
+// a family revision when the family has none or its config changed, then runs its task with the
+// nonce in the fetch container's environment.
 func (l *Launcher) Launch(ctx context.Context, session ids.SessionID, nonce ids.Nonce) error {
+	if err := l.Stop(ctx, session); err != nil {
+		return err
+	}
 	ap, err := l.efs.CreateAccessPoint(ctx, &efs.CreateAccessPointInput{
 		ClientToken:  aws.String(string(session)),
 		FileSystemId: aws.String(l.cfg.FileSystemID),
@@ -121,22 +132,33 @@ func (l *Launcher) Launch(ctx context.Context, session ids.SessionID, nonce ids.
 	return nil
 }
 
+// ensureFamily registers a revision when the family's latest one was made from another config: a
+// new image, size, handoff URL or CA then reaches the session's next launch.
 func (l *Launcher) ensureFamily(ctx context.Context, session ids.SessionID, accessPoint string) error {
-	_, err := l.ecs.DescribeTaskDefinition(ctx, &ecs.DescribeTaskDefinitionInput{TaskDefinition: aws.String(family(session))})
-	if err == nil {
-		return nil
+	def := l.taskDefinition(session, accessPoint)
+	raw, err := json.Marshal(def)
+	if err != nil {
+		return err
 	}
-	if !notFound(err) {
+	sum := sha256.Sum256(raw)
+	config := hex.EncodeToString(sum[:16])
+	out, err := l.ecs.DescribeTaskDefinition(ctx, &ecs.DescribeTaskDefinitionInput{
+		TaskDefinition: aws.String(family(session)),
+		Include:        []ecstypes.TaskDefinitionField{ecstypes.TaskDefinitionFieldTags},
+	})
+	ce, isClient := errors.AsType[*ecstypes.ClientException](err)
+	missing := isClient && strings.Contains(strings.ToLower(ce.ErrorMessage()), "unable to describe task definition")
+	if err != nil && !missing {
 		return fmt.Errorf("reading the task definition: %w", err)
 	}
-	if _, err := l.ecs.RegisterTaskDefinition(ctx, l.taskDefinition(session, accessPoint)); err != nil {
+	if err == nil && slices.ContainsFunc(out.Tags, func(t ecstypes.Tag) bool {
+		return aws.ToString(t.Key) == tagConfig && aws.ToString(t.Value) == config
+	}) {
+		return nil
+	}
+	def.Tags = []ecstypes.Tag{{Key: aws.String(tagConfig), Value: aws.String(config)}}
+	if _, err := l.ecs.RegisterTaskDefinition(ctx, def); err != nil {
 		return fmt.Errorf("registering the task definition: %w", err)
 	}
 	return nil
-}
-
-// notFound is ECS's answer for a family with no active revision.
-func notFound(err error) bool {
-	ce, ok := errors.AsType[*ecstypes.ClientException](err)
-	return ok && strings.Contains(strings.ToLower(ce.ErrorMessage()), "unable to describe task definition")
 }

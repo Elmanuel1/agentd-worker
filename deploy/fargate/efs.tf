@@ -20,6 +20,15 @@ resource "aws_efs_file_system_policy" "workspaces" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
+      # A file system policy replaces EFS's default allow, so sandbox tasks, which mount through
+      # their access point with no IAM identity, need this one.
+      Sid       = "MountThroughTargets"
+      Effect    = "Allow"
+      Principal = { AWS = "*" }
+      Action    = ["elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"]
+      Resource  = aws_efs_file_system.workspaces.arn
+      Condition = { Bool = { "elasticfilesystem:AccessedViaMountTarget" = "true" } }
+      }, {
       Sid       = "TLSOnly"
       Effect    = "Deny"
       Principal = { AWS = "*" }
