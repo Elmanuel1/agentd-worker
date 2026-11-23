@@ -47,10 +47,14 @@ def test_a_tool_call_runs_in_a_sandbox_the_controller_launched(client, environme
 
 
 def test_the_sandbox_holds_no_runtime_or_environment_key(client, environment) -> None:
+    _, controller = environment
     session = start(client, environment, "e2e-env")
     out = text(results(wait("the turn to end", lambda: finished(client, session)))[0])
-    assert f"ANTHROPIC_SESSION_ID={session.id}" in out
-    assert "sk-ant-oat01-" not in out and "ANTHROPIC_ENVIRONMENT_KEY" not in out
+    # ant runs a tool with no ANTHROPIC_* variable; the wrapper's stand-in for the API server shows
+    # the command ran in our sandbox.
+    assert "KUBERNETES_SERVICE_HOST=169.254.169.254" in out
+    key = controller.env["ANTHROPIC_ENVIRONMENT_KEY"]
+    assert key not in out and "sk-ant-oat01-" not in out and "ANTHROPIC_ENVIRONMENT_KEY" not in out
 
 
 def test_a_killed_worker_is_answered_with_an_error_and_the_next_call_runs(client, environment) -> None:

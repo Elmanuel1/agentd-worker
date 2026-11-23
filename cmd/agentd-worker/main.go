@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -35,11 +36,16 @@ func main() {
 		os.Exit(2)
 	}
 	if err := run(ctx, log); err != nil {
-		log.Error(os.Args[1]+" failed", "error", err)
+		if !errors.Is(err, errLogged) {
+			log.Error(os.Args[1]+" failed", "error", err)
+		}
 		stop()
 		os.Exit(1)
 	}
 }
+
+// errLogged marks a failure its command already logged at its own level, as one nobody must act on.
+var errLogged = errors.New("logged")
 
 func level() slog.Level {
 	var l slog.Level

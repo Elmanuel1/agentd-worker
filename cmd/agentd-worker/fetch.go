@@ -38,7 +38,17 @@ func runFetch(ctx context.Context, log *slog.Logger) error {
 		Timeout:   10 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}},
 	}
-	if err := fetch.Run(ctx, client, cfg); err != nil {
+	// Both endings without the item are the controller's to handle: it removes the sandbox and the
+	// item comes again. A refusal is its answer to a sandbox it holds no item for, as after its restart.
+	err := fetch.Run(ctx, client, cfg)
+	switch {
+	case errors.Is(err, fetch.ErrRefused):
+		log.Info("the controller refused the work item", "error", err)
+		return errors.Join(errLogged, err)
+	case errors.Is(err, fetch.ErrTimeout):
+		log.Warn("no work item within the handoff wait", "error", err)
+		return errors.Join(errLogged, err)
+	case err != nil:
 		return err
 	}
 	log.Info("work item collected")
