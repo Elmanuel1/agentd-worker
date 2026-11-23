@@ -12,6 +12,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ecs v1.106.0
 	github.com/aws/aws-sdk-go-v2/service/efs v1.51.6
 	github.com/containerd/errdefs v1.0.0
+	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/moby/moby/api v1.57.0
 	github.com/moby/moby/client v0.6.3
 	go.opentelemetry.io/otel v1.47.0

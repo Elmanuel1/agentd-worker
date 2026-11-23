@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/kelseyhightower/envconfig"
+
 	"github.com/Elmanuel1/agentd-worker/internal/agentd"
 	"github.com/Elmanuel1/agentd-worker/internal/fetch"
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
@@ -21,19 +23,26 @@ import (
 // Anthropic's image runs the worker as uid 1001 in group 1000.
 const workerUID, workerGID = 1001, 1000
 
+// FetchSettings are a fetch container's, from its launcher.
+type FetchSettings struct {
+	URL   string        `envconfig:"AGENTD_HANDOFF_URL" required:"true"`
+	Nonce ids.Nonce     `envconfig:"AGENTD_HANDOFF_NONCE" required:"true"`
+	CA    string        `envconfig:"AGENTD_HANDOFF_CA" required:"true"`
+	Wait  time.Duration `envconfig:"AGENTD_HANDOFF_WAIT" default:"120s"`
+	Dir   string        `envconfig:"CMA_SHARED_DIR" default:"/run/cma"`
+}
+
 func runFetch(ctx context.Context, log *slog.Logger) error {
-	var e env
-	cfg := fetch.Config{
-		URL: e.required("AGENTD_HANDOFF_URL"), Nonce: ids.Nonce(e.required("AGENTD_HANDOFF_NONCE")),
-		Dir: e.str("CMA_SHARED_DIR", "/run/cma"), UID: workerUID, GID: workerGID,
-		Every: 2 * time.Second, Wait: e.duration("AGENTD_HANDOFF_WAIT", 120*time.Second),
-	}
-	ca := e.required("AGENTD_HANDOFF_CA")
-	if err := e.err(); err != nil {
+	var s FetchSettings
+	if err := envconfig.Process("", &s); err != nil {
 		return err
 	}
+	if s.Wait <= 0 {
+		return errors.New("AGENTD_HANDOFF_WAIT must be positive")
+	}
+	cfg := fetch.Config{URL: s.URL, Nonce: s.Nonce, Dir: s.Dir, UID: workerUID, GID: workerGID, Every: 2 * time.Second, Wait: s.Wait}
 	roots := x509.NewCertPool()
-	if !roots.AppendCertsFromPEM([]byte(ca)) {
+	if !roots.AppendCertsFromPEM([]byte(s.CA)) {
 		return errors.New("AGENTD_HANDOFF_CA holds no certificate")
 	}
 	client := &http.Client{
@@ -47,9 +56,17 @@ func runFetch(ctx context.Context, log *slog.Logger) error {
 	return nil
 }
 
+// SidecarSettings are a sidecar container's.
+type SidecarSettings struct {
+	Dir string `envconfig:"CMA_SHARED_DIR" default:"/run/cma"`
+}
+
 func runSidecar(ctx context.Context, log *slog.Logger) error {
-	var e env
-	cfg := sidecar.Config{Dir: e.str("CMA_SHARED_DIR", "/run/cma"), Every: time.Second}
+	var s SidecarSettings
+	if err := envconfig.Process("", &s); err != nil {
+		return err
+	}
+	cfg := sidecar.Config{Dir: s.Dir, Every: time.Second}
 	connect := func(baseURL string, env ids.EnvironmentID, token ids.WorkToken) sidecar.Items {
 		return agentd.New(baseURL, env, token.Reveal(), requestTimeout)
 	}
@@ -60,13 +77,15 @@ func runSidecar(ctx context.Context, log *slog.Logger) error {
 	return nil
 }
 
+// ReaperSettings are the reaper's when it runs alone.
+type ReaperSettings struct {
+	AgentdSettings
+	ReapSettings
+}
+
 func runReap(ctx context.Context, log *slog.Logger) error {
-	var e env
-	baseURL := e.required("ANTHROPIC_BASE_URL")
-	envID := ids.EnvironmentID(e.required("ANTHROPIC_ENVIRONMENT_ID"))
-	key := ids.NewSecret(e.required("ANTHROPIC_ENVIRONMENT_KEY"))
-	cfg := reapConfig(&e)
-	if err := e.err(); err != nil {
+	var s ReaperSettings
+	if err := envconfig.Process("", &s); err != nil {
 		return err
 	}
 	meter, shutdown, err := telemetry.Setup(ctx, "agentd-worker-reap")
@@ -74,22 +93,26 @@ func runReap(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 	defer shutdown(context.WithoutCancel(ctx))
-	client := agentd.New(baseURL, envID, key.Reveal(), requestTimeout)
-	reaper, err := reap.New(cfg, client, client.Events(), meter, log)
+	client := agentd.New(s.BaseURL, s.EnvironmentID, s.Key.Reveal(), requestTimeout)
+	reaper, err := reap.New(s.ReapSettings.config(), client, client.Events(), meter, log)
 	if err != nil {
 		return err
 	}
-	log.Info("reaper started", "environment_id", envID)
+	log.Info("reaper started", "environment_id", s.EnvironmentID)
 	return reaper.Run(ctx)
 }
 
+// ResolverSettings are the DNS relay's.
+type ResolverSettings struct {
+	Addr     string `envconfig:"AGENTD_RESOLVER_ADDR" default:":53"`
+	Upstream string `envconfig:"AGENTD_RESOLVER_UPSTREAM" default:"127.0.0.11:53"`
+}
+
 func runResolver(ctx context.Context, log *slog.Logger) error {
-	var e env
-	addr := e.str("AGENTD_RESOLVER_ADDR", ":53")
-	upstream := e.str("AGENTD_RESOLVER_UPSTREAM", "127.0.0.11:53")
-	if err := e.err(); err != nil {
+	var s ResolverSettings
+	if err := envconfig.Process("", &s); err != nil {
 		return err
 	}
-	log.Info("resolver started", "addr", addr, "upstream", upstream)
-	return resolver.Serve(ctx, addr, upstream, log)
+	log.Info("resolver started", "addr", s.Addr, "upstream", s.Upstream)
+	return resolver.Serve(ctx, s.Addr, s.Upstream, log)
 }

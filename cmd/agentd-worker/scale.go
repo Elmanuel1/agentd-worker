@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -8,12 +9,12 @@ import (
 	"os"
 	"time"
 
+	"github.com/kelseyhightower/envconfig"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/Elmanuel1/agentd-worker/internal/agentd"
 	"github.com/Elmanuel1/agentd-worker/internal/dispatch"
 	"github.com/Elmanuel1/agentd-worker/internal/dispatch/handoff"
-	"github.com/Elmanuel1/agentd-worker/internal/ids"
 	"github.com/Elmanuel1/agentd-worker/internal/reap"
 	"github.com/Elmanuel1/agentd-worker/internal/telemetry"
 )
@@ -21,41 +22,51 @@ import (
 // requestTimeout bounds one agentd request; a poll blocks at most 999 ms of it.
 const requestTimeout = 30 * time.Second
 
-// backend is a Launcher and its Locator, closed on shutdown.
-type backend interface {
-	dispatch.Launcher
-	dispatch.Locator
-	Close()
+// ScaleSettings are the controller's. HandoffWait left unset takes the backend's default.
+type ScaleSettings struct {
+	AgentdSettings
+	ReapSettings
+	Launcher        string  `envconfig:"AGENTD_WORKER_LAUNCHER" default:"docker"`
+	HandoffWait     seconds `envconfig:"AGENTD_HANDOFF_WAIT_SECONDS"`
+	MaxSandboxes    int     `envconfig:"AGENTD_MAX_SANDBOXES" default:"100"`
+	ReleaseInterval seconds `envconfig:"AGENTD_RELEASE_INTERVAL_SECONDS" default:"600"`
+	RetentionDays   uint    `envconfig:"AGENTD_RETENTION_DAYS" default:"0"`
+	HandoffAddr     string  `envconfig:"AGENTD_HANDOFF_ADDR" default:":8443"`
+	HandoffCert     string  `envconfig:"AGENTD_HANDOFF_CERT" required:"true"`
+	HandoffKey      string  `envconfig:"AGENTD_HANDOFF_KEY" required:"true"`
+	HandoffURL      string  `envconfig:"AGENTD_HANDOFF_URL" required:"true"`
+	HandoffCA       string  `envconfig:"AGENTD_HANDOFF_CA" required:"true"`
+	SandboxBaseURL  string  `envconfig:"AGENTD_SANDBOX_BASE_URL"`
+	SandboxImage    string  `envconfig:"AGENTD_SANDBOX_IMAGE" required:"true"`
+	ToolImage       string  `envconfig:"AGENTD_TOOL_IMAGE" required:"true"`
 }
 
 func runScale(ctx context.Context, log *slog.Logger) error {
-	var e env
-	baseURL := e.required("ANTHROPIC_BASE_URL")
-	envID := ids.EnvironmentID(e.required("ANTHROPIC_ENVIRONMENT_ID"))
-	key := ids.NewSecret(e.required("ANTHROPIC_ENVIRONMENT_KEY"))
-	launcher := e.str("AGENTD_WORKER_LAUNCHER", "docker")
-	cfg := dispatchConfig(&e, launcher)
-	reapCfg := reapConfig(&e)
-	addr := e.str("AGENTD_HANDOFF_ADDR", ":8443")
-	cert, certErr := tls.X509KeyPair([]byte(e.required("AGENTD_HANDOFF_CERT")), []byte(e.required("AGENTD_HANDOFF_KEY")))
-	sandboxBaseURL := e.str("AGENTD_SANDBOX_BASE_URL", baseURL)
-	sandboxes := sandboxConfig{
-		handoffURL: e.required("AGENTD_HANDOFF_URL"), handoffCA: e.required("AGENTD_HANDOFF_CA"), handoffWait: cfg.HandoffWait,
-		sandboxImage: e.required("AGENTD_SANDBOX_IMAGE"), toolImage: e.required("AGENTD_TOOL_IMAGE"),
-	}
-	if err := e.err(); err != nil {
+	var s ScaleSettings
+	if err := envconfig.Process("", &s); err != nil {
 		return err
 	}
-	if certErr != nil {
-		return fmt.Errorf("AGENTD_HANDOFF_CERT and AGENTD_HANDOFF_KEY: %w", certErr)
+	l, err := launcherNamed(s.Launcher)
+	if err != nil {
+		return err
 	}
+	cert, err := tls.X509KeyPair([]byte(s.HandoffCert), []byte(s.HandoffKey))
+	if err != nil {
+		return fmt.Errorf("AGENTD_HANDOFF_CERT and AGENTD_HANDOFF_KEY: %w", err)
+	}
+	cfg := dispatchConfig(s, l)
+	sandboxes := sandboxConfig{
+		handoffURL: s.HandoffURL, handoffCA: s.HandoffCA, handoffWait: cfg.HandoffWait,
+		sandboxImage: s.SandboxImage, toolImage: s.ToolImage,
+	}
+	sandboxBaseURL := cmp.Or(s.SandboxBaseURL, s.BaseURL)
 
 	meter, shutdown, err := telemetry.Setup(ctx, "agentd-worker-scale")
 	if err != nil {
 		return err
 	}
 	defer shutdown(context.WithoutCancel(ctx))
-	be, err := newBackend(ctx, launcher, sandboxes, log)
+	be, err := l.open(ctx, sandboxes, log)
 	if err != nil {
 		return err
 	}
@@ -65,43 +76,32 @@ func runScale(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	client := agentd.New(baseURL, envID, key.Reveal(), requestTimeout).WithWorker(host)
+	client := agentd.New(s.BaseURL, s.EnvironmentID, s.Key.Reveal(), requestTimeout).WithWorker(host)
 	store := handoff.NewStore(be)
 	ctrl, err := dispatch.New(cfg, client, client, be, be, store, meter, log)
 	if err != nil {
 		return err
 	}
-	reaper, err := reap.New(reapCfg, client, client.Events(), meter, log)
+	reaper, err := reap.New(s.ReapSettings.config(), client, client.Events(), meter, log)
 	if err != nil {
 		return err
 	}
-	server := handoff.NewServer(store, envID, sandboxBaseURL, log)
+	server := handoff.NewServer(store, s.EnvironmentID, sandboxBaseURL, log)
 	g, ctx := errgroup.WithContext(ctx)
-	g.Go(func() error { return handoff.Serve(ctx, addr, cert, server.Handler()) })
+	g.Go(func() error { return handoff.Serve(ctx, s.HandoffAddr, cert, server.Handler()) })
 	g.Go(func() error { return ctrl.Run(ctx) })
 	g.Go(func() error { return ctrl.Release(ctx) })
 	g.Go(func() error { return reaper.Run(ctx) })
-	log.Info("controller started", "environment_id", envID, "launcher", launcher)
+	log.Info("controller started", "environment_id", s.EnvironmentID, "launcher", s.Launcher)
 	return g.Wait()
 }
 
-// On Fargate the handoff wait defaults to the most its start timeout leaves room for.
-func dispatchConfig(e *env, launcher string) dispatch.Config {
-	wait := 120
-	if launcher == "fargate" {
-		wait = int(fargateMaxWait / time.Second)
-	}
+// dispatchConfig gives the backend's handoff wait to a controller that sets none.
+func dispatchConfig(s ScaleSettings, l launcher) dispatch.Config {
 	return dispatch.Config{
-		HandoffWait:     e.seconds("AGENTD_HANDOFF_WAIT_SECONDS", wait),
-		MaxSandboxes:    e.number("AGENTD_MAX_SANDBOXES", 100, 1),
-		ReleaseInterval: e.seconds("AGENTD_RELEASE_INTERVAL_SECONDS", 600),
-		Retention:       time.Duration(e.number("AGENTD_RETENTION_DAYS", 0, 0)) * 24 * time.Hour,
-	}
-}
-
-func reapConfig(e *env) reap.Config {
-	return reap.Config{
-		Interval:   e.seconds("AGENTD_REAP_INTERVAL_SECONDS", 60),
-		StaleAfter: e.seconds("AGENTD_STALE_AFTER_SECONDS", 360),
+		HandoffWait:     cmp.Or(time.Duration(s.HandoffWait), l.handoffWait),
+		MaxSandboxes:    s.MaxSandboxes,
+		ReleaseInterval: time.Duration(s.ReleaseInterval),
+		Retention:       time.Duration(s.RetentionDays) * 24 * time.Hour,
 	}
 }

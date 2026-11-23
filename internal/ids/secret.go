@@ -22,6 +22,12 @@ func NewSecret(v string) Secret { return Secret{v: v} }
 // Reveal returns the value, for the one place that must send it.
 func (s Secret) Reveal() string { return s.v }
 
+// UnmarshalText reads a secret from configuration, so a setting holds it typed.
+func (s *Secret) UnmarshalText(text []byte) error {
+	s.v = string(text)
+	return nil
+}
+
 func (Secret) String() string               { return redacted }
 func (Secret) GoString() string             { return redacted }
 func (Secret) LogValue() slog.Value         { return slog.StringValue(redacted) }
