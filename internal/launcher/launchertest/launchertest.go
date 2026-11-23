@@ -31,6 +31,7 @@ func Run(t *testing.T, newSubject func(t *testing.T) (Subject, Count)) {
 	}{
 		{"launch runs the sandbox", launchRuns},
 		{"launch twice keeps one sandbox", launchTwice},
+		{"launch twice under one nonce keeps one running sandbox", launchRepeated},
 		{"stop keeps the session's volume", stopKeeps},
 		{"release forgets the session", releaseForgets},
 		{"calls on an unknown session are safe", unknownSafe},
@@ -71,6 +72,17 @@ func launchTwice(t *testing.T, ctx context.Context, l Subject, count Count, s id
 	must(t, err)
 	if n := len(slices.DeleteFunc(all, func(sb dispatch.Sandbox) bool { return sb.Session != s })); n != 1 {
 		t.Errorf("List shows the session %d times", n)
+	}
+}
+
+// launchRepeated holds that a repeated Launch, as a retry sends it, leaves the session running.
+func launchRepeated(t *testing.T, ctx context.Context, l Subject, count Count, s ids.SessionID) {
+	nonce := ids.NewNonce()
+	must(t, l.Launch(ctx, s, nonce))
+	must(t, l.Launch(ctx, s, nonce))
+	waitRunning(t, ctx, l, s, true)
+	if n, err := count(ctx, s); err != nil || n != 1 {
+		t.Errorf("the backend holds %d sandboxes for the session, %v; want 1", n, err)
 	}
 }
 

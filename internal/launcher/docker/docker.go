@@ -47,6 +47,7 @@ type Launcher struct {
 	watch  context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+	gate   *gate
 }
 
 // New checks the engine has cfg.Runtime and adopts the sandboxes of earlier launches.
@@ -59,7 +60,7 @@ func New(ctx context.Context, cli *client.Client, cfg Config, log *slog.Logger) 
 		return nil, fmt.Errorf("%w %q; it has %v", ErrNoRuntime, cfg.Runtime, slices.Sorted(maps.Keys(info.Info.Runtimes)))
 	}
 	watch, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	l := &Launcher{cli: cli, cfg: cfg, log: log, watch: watch, cancel: cancel}
+	l := &Launcher{cli: cli, cfg: cfg, log: log, watch: watch, cancel: cancel, gate: newGate()}
 	if err := l.startResolver(ctx); err != nil {
 		cancel()
 		return nil, err

@@ -61,6 +61,12 @@ func (s *Server) workItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, e, err := s.authorize(r)
+	// A failed lookup may pass, so the sandbox asks again; a refusal is final.
+	if errors.Is(err, ErrLocate) {
+		s.log.Warn("work item held: the sandbox's address could not be read", "remote", r.RemoteAddr, "error", err)
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	if err != nil {
 		s.log.Info("work item refused", "remote", r.RemoteAddr, "reason", err.Error())
 		http.Error(w, "forbidden", http.StatusForbidden)
@@ -92,7 +98,7 @@ func (s *Server) authorize(r *http.Request) (ids.SessionID, *entry, error) {
 	peer, peerErr := netip.ParseAddr(host)
 	switch {
 	case err != nil:
-		err = errors.Join(ErrNotRunning, err)
+		err = errors.Join(ErrLocate, err)
 	case !running:
 		err = ErrNotRunning
 	case peerErr != nil || peer.Unmap() != addr.Unmap():

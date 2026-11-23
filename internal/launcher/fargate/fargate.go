@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -78,10 +79,11 @@ type Launcher struct {
 	tasks map[ids.SessionID]launched
 }
 
-// launched is the task a Launch ran, and when.
+// launched is the task a Launch ran, when, and under which nonce.
 type launched struct {
-	arn string
-	at  time.Time
+	arn   string
+	at    time.Time
+	nonce ids.Nonce
 }
 
 // MaxHandoffWait keeps the handoff wait inside the start timeout a Fargate container waits for its
@@ -109,8 +111,22 @@ func sessionDir(s ids.SessionID) string { return "sessions/" + string(s) }
 
 // Launch stops the session's earlier tasks, makes its access point and family revision when it has
 // none or its config changed, then runs that revision with the nonce in the fetch container's
-// environment. The nonce is the call's idempotency token, so an SDK retry runs no second task.
+// environment. The nonce is the call's idempotency token, so an SDK retry runs no second task, and
+// a repeated Launch would only replay the first: its task still running is this launch, done, and
+// one stopped cannot run again under it.
 func (l *Launcher) Launch(ctx context.Context, session ids.SessionID, nonce ids.Nonce) error {
+	l.mu.Lock()
+	known := l.tasks[session]
+	l.mu.Unlock()
+	if known.arn != "" && known.nonce == nonce {
+		tasks, err := l.describeTasks(ctx, []string{known.arn})
+		if err != nil || slices.ContainsFunc(tasks, func(t ecstypes.Task) bool {
+			return aws.ToString(t.DesiredStatus) == string(ecstypes.DesiredStatusRunning)
+		}) {
+			return err
+		}
+		return fmt.Errorf("launching session %s: its nonce already ran a task, which stopped", session)
+	}
 	if err := l.Stop(ctx, session); err != nil {
 		return err
 	}
@@ -143,7 +159,7 @@ func (l *Launcher) Launch(ctx context.Context, session ids.SessionID, nonce ids.
 		return fmt.Errorf("running the task: %v", out.Failures)
 	}
 	l.mu.Lock()
-	l.tasks[session] = launched{arn: aws.ToString(out.Tasks[0].TaskArn), at: time.Now()}
+	l.tasks[session] = launched{arn: aws.ToString(out.Tasks[0].TaskArn), at: time.Now(), nonce: nonce}
 	l.mu.Unlock()
 	return nil
 }

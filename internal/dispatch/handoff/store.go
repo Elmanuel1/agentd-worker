@@ -15,6 +15,8 @@ var (
 	ErrUnknownNonce = errors.New("nonce is not valid")
 	// ErrNotRunning means the nonce's sandbox is not running.
 	ErrNotRunning = errors.New("the sandbox is not running")
+	// ErrLocate means the sandbox's address could not be read; it may still be running.
+	ErrLocate = errors.New("the sandbox's address could not be read")
 	// ErrWrongSource means the request came from an address other than the sandbox's.
 	ErrWrongSource = errors.New("request did not come from the sandbox")
 )

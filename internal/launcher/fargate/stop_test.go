@@ -150,7 +150,9 @@ func TestStopsATaskNotYetListed(t *testing.T) {
 				if err := l.Launch(t.Context(), "sesn_1", "n1"); err != nil {
 					t.Fatal(err)
 				}
-				l.tasks["sesn_1"] = launched{l.tasks["sesn_1"].arn, time.Now().Add(-c.age)}
+				aged := l.tasks["sesn_1"]
+				aged.at = time.Now().Add(-c.age)
+				l.tasks["sesn_1"] = aged
 				// A task ECS dropped long after its launch had stopped: ECS returns every running one.
 				if c.age > 0 {
 					f.StopTask(t.Context(), &ecs.StopTaskInput{Task: aws.String(l.tasks["sesn_1"].arn)})

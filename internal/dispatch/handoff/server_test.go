@@ -24,7 +24,8 @@ func (l locator) Address(context.Context, ids.SessionID) (netip.Addr, bool, erro
 	return l.addr, l.running, l.err
 }
 
-// TestWorkItem holds SC-3 and SC-4: only the held nonce, from the running sandbox's own address, collects.
+// TestWorkItem holds SC-3 and SC-4: only the held nonce, from the running sandbox's own address,
+// collects; a lookup that fails holds the item for the sandbox to ask again.
 func TestWorkItem(t *testing.T) {
 	own := netip.MustParseAddr("192.0.2.1")
 	cases := []struct {
@@ -40,7 +41,7 @@ func TestWorkItem(t *testing.T) {
 		{"empty nonce", "", locator{own, true, nil}, http.MethodGet, http.StatusForbidden, false},
 		{"wrong address", "n1", locator{netip.MustParseAddr("192.0.2.9"), true, nil}, http.MethodGet, http.StatusForbidden, false},
 		{"stopped sandbox", "n1", locator{own, false, nil}, http.MethodGet, http.StatusForbidden, false},
-		{"lookup failed", "n1", locator{own, true, errors.New("engine down")}, http.MethodGet, http.StatusForbidden, false},
+		{"a failed lookup holds the item for the sandbox's retry", "n1", locator{own, true, errors.New("engine down")}, http.MethodGet, http.StatusServiceUnavailable, false},
 		{"head spends nothing", "n1", locator{own, true, nil}, http.MethodHead, http.StatusMethodNotAllowed, false},
 	}
 	for _, c := range cases {

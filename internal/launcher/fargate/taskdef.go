@@ -53,7 +53,10 @@ func (l *Launcher) taskDefinition(session ids.SessionID, accessPoint string) *ec
 		ContainerDefinitions: []types.ContainerDefinition{
 			{
 				Name: aws.String(containerFetch), Image: aws.String(l.cfg.ToolImage), Command: []string{"fetch"}, User: aws.String("0"),
-				Essential:        aws.Bool(false),
+				Essential: aws.Bool(false),
+				// ECS bounds the worker's wait for fetch by fetch's own start timeout, which the
+				// handoff wait ends inside (MaxHandoffWait).
+				StartTimeout:     aws.Int32(int32(startTimeout / time.Second)),
 				Environment:      fetchEnv,
 				MountPoints:      []types.MountPoint{run},
 				LogConfiguration: l.logs(containerFetch),
@@ -67,9 +70,7 @@ func (l *Launcher) taskDefinition(session ids.SessionID, accessPoint string) *ec
 					{ContainerName: aws.String(containerFetch), Condition: types.ContainerConditionSuccess},
 					{ContainerName: aws.String(containerSidecar), Condition: types.ContainerConditionStart},
 				},
-				// Fargate's limits for both: the handoff wait ends inside the start timeout
-				// (MaxHandoffWait), and ant gets 60 s after SIGTERM to post its result and stop its item.
-				StartTimeout:     aws.Int32(int32(startTimeout / time.Second)),
+				// ant gets 60 s after SIGTERM to post its result and stop its item.
 				StopTimeout:      aws.Int32(60),
 				MountPoints:      []types.MountPoint{workspace, run},
 				LogConfiguration: l.logs(containerWorker),

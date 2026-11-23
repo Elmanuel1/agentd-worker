@@ -100,6 +100,20 @@ func TestLaunchAndRelease(t *testing.T) {
 	}
 }
 
+// TestRelaunchUnderAStoppedNonce holds that a repeated Launch whose task has stopped fails, since
+// ECS would only replay that task.
+func TestRelaunchUnderAStoppedNonce(t *testing.T) {
+	f := newFake()
+	l := open(t, f, f, cfg)
+	if err := l.Launch(t.Context(), "sesn_1", "n1"); err != nil {
+		t.Fatal(err)
+	}
+	f.StopTask(t.Context(), &ecs.StopTaskInput{Task: aws.String(l.tasks["sesn_1"].arn)})
+	if err := l.Launch(t.Context(), "sesn_1", "n1"); err == nil {
+		t.Error("a launch under a nonce whose task stopped reported a sandbox")
+	}
+}
+
 // TestTaskDefinition holds FG-5 and FG-8. ECS publishes no JSON schema, so the definition goes
 // through the SDK's own validation and serializer, and the wire JSON is checked.
 func TestTaskDefinition(t *testing.T) {
@@ -118,11 +132,12 @@ func TestTaskDefinition(t *testing.T) {
 		PidMode         *string
 		RuntimePlatform struct{ CpuArchitecture string }
 		Containers      []struct {
-			Name      string
-			Essential bool
-			Secrets   []any
-			Command   []string
-			DependsOn []struct{ ContainerName, Condition string }
+			Name         string
+			Essential    bool
+			Secrets      []any
+			Command      []string
+			StartTimeout int
+			DependsOn    []struct{ ContainerName, Condition string }
 		} `json:"containerDefinitions"`
 	}
 	if err := json.Unmarshal(body, &def); err != nil {
@@ -138,6 +153,10 @@ func TestTaskDefinition(t *testing.T) {
 		if c.Essential != (c.Name == containerWorker) {
 			t.Errorf("%s essential %v", c.Name, c.Essential)
 		}
+	}
+	// ECS applies a start timeout to the container waited on, so fetch's bounds the handoff.
+	if fetch, worker := def.Containers[0], def.Containers[1]; fetch.StartTimeout != 120 || worker.StartTimeout != 0 {
+		t.Errorf("start timeouts: fetch %d, worker %d; want 120 on fetch only", fetch.StartTimeout, worker.StartTimeout)
 	}
 	if cmd := def.Containers[1].Command; !slices.Equal(cmd, []string{"cma-sandbox-worker"}) {
 		t.Errorf("worker command %q, want Anthropic's worker script, as the chart runs it", cmd)

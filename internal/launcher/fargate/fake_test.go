@@ -21,6 +21,7 @@ type fakeAWS struct {
 	mu     sync.Mutex
 	n      int
 	tasks  map[string]*ecstypes.Task
+	tokens map[string]string
 	defs   map[string]string // ARN -> ACTIVE or INACTIVE
 	tags   map[string][]ecstypes.Tag
 	points map[string]efstypes.AccessPointDescription
@@ -28,14 +29,19 @@ type fakeAWS struct {
 }
 
 func newFake() *fakeAWS {
-	return &fakeAWS{tasks: map[string]*ecstypes.Task{}, defs: map[string]string{}, tags: map[string][]ecstypes.Tag{}, points: map[string]efstypes.AccessPointDescription{}}
+	return &fakeAWS{tasks: map[string]*ecstypes.Task{}, tokens: map[string]string{}, defs: map[string]string{}, tags: map[string][]ecstypes.Tag{}, points: map[string]efstypes.AccessPointDescription{}}
 }
 
 func (f *fakeAWS) RunTask(_ context.Context, in *ecs.RunTaskInput, _ ...func(*ecs.Options)) (*ecs.RunTaskOutput, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	// ECS replays a repeated client token's first task.
+	if arn, ok := f.tokens[aws.ToString(in.ClientToken)]; ok {
+		return &ecs.RunTaskOutput{Tasks: []ecstypes.Task{*f.tasks[arn]}}, nil
+	}
 	f.n++
 	arn := fmt.Sprintf("arn:aws:ecs:r:1:task/c/%d", f.n)
+	f.tokens[aws.ToString(in.ClientToken)] = arn
 	f.tasks[arn] = &ecstypes.Task{TaskArn: aws.String(arn), TaskDefinitionArn: in.TaskDefinition, StartedBy: in.StartedBy, LastStatus: aws.String(lastRunning), DesiredStatus: aws.String(string(ecstypes.DesiredStatusRunning)),
 		Attachments: []ecstypes.Attachment{{Details: []ecstypes.KeyValuePair{{Name: aws.String("privateIPv4Address"), Value: aws.String(fmt.Sprintf("10.0.0.%d", f.n))}}}}}
 	f.runs = append(f.runs, in)
