@@ -113,24 +113,32 @@ func (refusing) StopTask(context.Context, *ecs.StopTaskInput, ...func(*ecs.Optio
 // TestStopsATaskNotYetListed holds FG-3 while ListTasks lags: the task the last Launch ran is
 // stopped by its ARN and waited for, and Stop forgets it only once it has stopped.
 func TestStopsATaskNotYetListed(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		f := unlisted{&lagging{fakeAWS: newFake(), seen: map[string]bool{}}}
-		l := New(f, f, f, cfg)
-		if err := l.Launch(t.Context(), "sesn_1", "n1"); err != nil {
-			t.Fatal(err)
-		}
-		start := time.Now()
-		err := l.Stop(t.Context(), "sesn_1")
-		if n, _ := f.running(t.Context(), "sesn_1"); err != nil || n != 0 || l.tasks["sesn_1"] != "" || time.Since(start) != 5*time.Second {
-			t.Errorf("Stop: %v after %s, %d running, known %q; want it stopped and waited for 5 s", err, time.Since(start), n, l.tasks["sesn_1"])
-		}
-		r := refusing{unlisted{&lagging{fakeAWS: newFake(), seen: map[string]bool{}}}}
-		l = New(r, r, r, cfg)
-		if err := l.Launch(t.Context(), "sesn_1", "n1"); err != nil {
-			t.Fatal(err)
-		}
-		if err := l.Stop(t.Context(), "sesn_1"); err == nil || l.tasks["sesn_1"] == "" {
-			t.Errorf("a failed stop: %v, known %q; want an error and the task kept for the retry", err, l.tasks["sesn_1"])
-		}
-	})
+	cases := []struct {
+		name    string
+		ecs     func(*lagging) ECS
+		failed  bool
+		running int
+		known   bool
+		took    time.Duration
+	}{
+		{"a task the list lags behind is stopped and waited for", func(f *lagging) ECS { return unlisted{f} }, false, 0, false, 5 * time.Second},
+		{"a refused stop keeps the task for the retry", func(f *lagging) ECS { return refusing{unlisted{f}} }, true, 1, true, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f := &lagging{fakeAWS: newFake(), seen: map[string]bool{}}
+				l := New(c.ecs(f), f, f, cfg)
+				if err := l.Launch(t.Context(), "sesn_1", "n1"); err != nil {
+					t.Fatal(err)
+				}
+				start := time.Now()
+				err := l.Stop(t.Context(), "sesn_1")
+				n, _ := f.running(t.Context(), "sesn_1")
+				if (err != nil) != c.failed || n != c.running || (l.tasks["sesn_1"] != "") != c.known || time.Since(start) != c.took {
+					t.Errorf("Stop: %v after %s, %d running, known %q", err, time.Since(start), n, l.tasks["sesn_1"])
+				}
+			})
+		})
+	}
 }
