@@ -11,8 +11,8 @@ esac
 dir="$(mktemp -d)"
 curl -fsSLo "$dir/gvisor.tar.bz2" "https://storage.googleapis.com/gvisor/releases/release/$release/$(uname -m)/gvisor.tar.bz2"
 echo "$sha512  $dir/gvisor.tar.bz2" | sha512sum -c -
-tar -xjf "$dir/gvisor.tar.bz2" -C "$dir" runsc containerd-shim-runsc-v1
-sudo install -m 0755 "$dir/runsc" "$dir/containerd-shim-runsc-v1" /usr/local/bin/
+# runsc runs the binaries in gvisor-bin/ beside it, so the whole archive goes in one place.
+sudo tar -xjf "$dir/gvisor.tar.bz2" --no-same-owner -C /usr/local/bin
 sudo /usr/local/bin/runsc install
 # Docker reloads its runtimes on SIGHUP, so the job's service containers keep running.
 sudo systemctl reload docker

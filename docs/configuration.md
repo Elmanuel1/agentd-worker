@@ -15,7 +15,7 @@ fills them (a Kubernetes Secret, an ECS task definition's `secrets`, a vault) is
 | `AGENTD_HANDOFF_URL` | required | `GET /work-item`'s base URL as sandboxes reach it |
 | `AGENTD_HANDOFF_CERT`, `AGENTD_HANDOFF_KEY` | required | its TLS certificate and key, PEM |
 | `AGENTD_HANDOFF_CA` | required | the CA, PEM, that sandboxes verify the certificate against |
-| `AGENTD_HANDOFF_WAIT_SECONDS` | `120` | how long a sandbox has to collect its item; the queue reclaims an unacked item after twice this. At most 110 on Fargate, whose containers wait at most 120 s for a dependency |
+| `AGENTD_HANDOFF_WAIT_SECONDS` | `120`; `110` on Fargate | how long a sandbox has to collect its item; the queue reclaims an unacked item after twice this. At most 110 on Fargate, whose containers wait at most 120 s for a dependency |
 | `AGENTD_MAX_SANDBOXES` | `100` | items handled at once; polling pauses at this number |
 | `AGENTD_RELEASE_INTERVAL_SECONDS` | `600` | how often the storage of deleted and archived sessions is released |
 | `AGENTD_RETENTION_DAYS` | `0` | also releases a session idle this many days with no running sandbox; `0` keeps it until it is deleted or archived, as Anthropic's dispatcher's `retentionDays` |

@@ -75,8 +75,11 @@ func (f *fakeAWS) DescribeTasks(_ context.Context, in *ecs.DescribeTasksInput, _
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := &ecs.DescribeTasksOutput{}
+	// ECS reports a task it no longer holds as a failure, not a task.
 	for _, arn := range in.Tasks {
-		out.Tasks = append(out.Tasks, *f.tasks[arn])
+		if t, ok := f.tasks[arn]; ok {
+			out.Tasks = append(out.Tasks, *t)
+		}
 	}
 	return out, nil
 }

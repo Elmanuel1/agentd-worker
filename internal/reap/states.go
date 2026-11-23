@@ -38,13 +38,14 @@ type Stopped struct {
 	reaped bool
 }
 
-// Answer posts an error result for each tool call the session still owes.
+// Answer posts an error result for each tool call the session still owes. Of a stopped item,
+// only calls made by its stop count: a later one is the session's next worker's.
 func (s Stopped) Answer(ctx context.Context, events Events) (Answered, error) {
 	log, err := events.List(ctx, s.item.Session)
 	if err != nil {
 		return Answered{}, fmt.Errorf("listing events of %s: %w", s.item.Session, err)
 	}
-	calls := owed(log)
+	calls := owed(log, s.item.StoppedAt)
 	if len(calls) == 0 {
 		return Answered{of: s}, nil
 	}

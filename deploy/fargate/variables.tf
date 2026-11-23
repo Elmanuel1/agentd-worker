@@ -51,13 +51,21 @@ variable "environment_key_secret_arn" {
 }
 
 variable "controller_image" {
-  description = "agentd-worker's image, by digest."
+  description = "agentd-worker's image in ECR, by digest."
   type        = string
+  validation {
+    condition     = can(regex("^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/[^@:]+(:[^@]+)?@sha256:[0-9a-f]{64}$", var.controller_image))
+    error_message = "An image in ECR by digest: sandboxes reach no other registry."
+  }
 }
 
 variable "sandbox_image" {
-  description = "agentd's sandbox image, by digest."
+  description = "agentd's sandbox image in ECR, by digest."
   type        = string
+  validation {
+    condition     = can(regex("^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/[^@:]+(:[^@]+)?@sha256:[0-9a-f]{64}$", var.sandbox_image))
+    error_message = "An image in ECR by digest: sandboxes reach no other registry."
+  }
 }
 
 variable "max_sandboxes" {
@@ -85,7 +93,7 @@ variable "otel_exporter_otlp_endpoint" {
 }
 
 variable "endpoints_security_group_id" {
-  description = "The security group of the VPC's interface endpoints for ECR and CloudWatch Logs."
+  description = "The security group of the VPC's interface endpoints; it must allow TCP 443 from both of this module's security groups."
   type        = string
 }
 

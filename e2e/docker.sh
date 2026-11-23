@@ -13,8 +13,17 @@ docker network inspect agentd-e2e >/dev/null 2>&1 ||
 	docker network create --subnet 172.30.0.0/24 --gateway "$gateway" agentd-e2e >/dev/null
 # Anthropic's script refuses to run where the metadata address answers, as it should on a host
 # that blocks it; the runner's own metadata service is blocked here the way a deployment blocks it.
+# Each rule added is removed on exit, however the run ends.
+added=0
+cleanup() {
+	if [ "$added" -ge 1 ]; then sudo iptables -D DOCKER-USER -d 169.254.0.0/16 -j REJECT; fi
+	if [ "$added" -ge 2 ]; then sudo iptables -D DOCKER-USER -i br-+ -d 168.63.129.16 -j REJECT; fi
+}
+trap cleanup EXIT
 sudo iptables -I DOCKER-USER -d 169.254.0.0/16 -j REJECT
+added=1
 sudo iptables -I DOCKER-USER -i br-+ -d 168.63.129.16 -j REJECT
+added=2
 
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -subj "/CN=agentd-e2e" \
 	-addext "subjectAltName=IP:$gateway" -keyout "$out/handoff.key" -out "$out/handoff.crt" 2>/dev/null

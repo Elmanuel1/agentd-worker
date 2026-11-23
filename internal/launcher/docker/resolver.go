@@ -78,14 +78,18 @@ func (l *Launcher) createResolver(ctx context.Context, name string) error {
 	return err
 }
 
-// replaceStaleResolver keeps an existing relay made from the tool image, and replaces one made
-// from another, so a new image reaches it.
+// replaceStaleResolver keeps an existing relay made from the image the tool image names now, and
+// replaces one made from another, so an image rebuilt under the same tag reaches it.
 func (l *Launcher) replaceStaleResolver(ctx context.Context, name string) error {
 	got, err := l.cli.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
 	if err != nil {
 		return err
 	}
-	if got.Container.Config.Image == l.cfg.ToolImage {
+	image, err := l.cli.ImageInspect(ctx, l.cfg.ToolImage)
+	if err != nil {
+		return fmt.Errorf("reading the tool image: %w", err)
+	}
+	if got.Container.Image == image.ID {
 		return nil
 	}
 	if _, err := l.cli.ContainerRemove(ctx, name, client.ContainerRemoveOptions{Force: true}); err != nil {

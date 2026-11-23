@@ -6,7 +6,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/run/work-item"
-secret="$(printf '%s' '{"sessions_token":"tok/+=","environment_variables":{"GITHUB_TOKEN":"agentd-ph-1","QUOTED":"a b'"'"'c","ANTHROPIC_BASE_URL":"evil","1BAD":"x"}}' | base64 | tr -d '\n=' | tr '/+' '_-')"
+secret="$(printf '%s' '{"sessions_token":"tok/+=","environment_variables":{"GITHUB_TOKEN":"agentd-ph-1","QUOTED":"a b'"'"'c","ANTHROPIC_BASE_URL":"evil","1BAD":"x","BAD\n":"y"}}' | base64 | tr -d '\n=' | tr '/+' '_-')"
 printf '%s' "$secret" > "$tmp/run/work-item/secret"
 printf 'sesn_1' > "$tmp/run/work-item/session_id"
 printf 'https://agentd.example:8443/' > "$tmp/run/work-item/base_url"
@@ -24,6 +24,7 @@ echo "$out" | grep -qx 'GITHUB_TOKEN=agentd-ph-1' || fail "the secret's variable
 echo "$out" | grep -qx "QUOTED=a b'c" || fail "a value with spaces and quotes is not kept whole"
 echo "$out" | grep -q '^ANTHROPIC_BASE_URL=' && fail "an ANTHROPIC_ variable from the secret was exported"
 echo "$out" | grep -q '^1BAD=' && fail "a name that is not a shell name was exported"
+echo "$out" | grep -q '^BAD' && fail "a name with a trailing newline was exported"
 echo "$out" | grep -qi '_proxy=' && fail "proxy set in an image built without one"
 echo "$out" | grep -qx 'KUBERNETES_SERVICE_HOST=169.254.169.254' || fail "the isolation probe has no stand-in host"
 

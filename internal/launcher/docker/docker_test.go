@@ -155,11 +155,30 @@ func TestAdoptsAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	first.Close()
-	second := newLauncher(t, cfg)
-	t.Cleanup(func() { second.Release(context.Background(), session) })
+	waitRemoved(t, newLauncher(t, cfg), session, "the adopted sandbox was not removed after its fetch gave up")
+}
+
+// TestRemovesAnUnfetchedSandbox holds DK-1 across a restart between creating a sandbox and
+// starting its fetch: the new adapter removes it rather than start its worker with no item.
+func TestRemovesAnUnfetchedSandbox(t *testing.T) {
+	cfg := config(t)
+	session := ids.SessionID("sesn_unfetched")
+	first := newLauncher(t, cfg)
+	for _, spec := range first.specs(session, ids.NewNonce()) {
+		if _, err := first.cli.ContainerCreate(t.Context(), spec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first.Close()
+	waitRemoved(t, newLauncher(t, cfg), session, "a sandbox whose fetch never started was kept")
+}
+
+func waitRemoved(t *testing.T, l *Launcher, session ids.SessionID, failure string) {
+	t.Helper()
+	t.Cleanup(func() { l.Release(context.Background(), session) })
 	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
-		cs, err := second.containers(t.Context(), session)
+		cs, err := l.containers(t.Context(), session)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -168,5 +187,5 @@ func TestAdoptsAfterRestart(t *testing.T) {
 		}
 		time.Sleep(time.Second)
 	}
-	t.Error("the adopted sandbox was not removed after its fetch gave up")
+	t.Error(failure)
 }

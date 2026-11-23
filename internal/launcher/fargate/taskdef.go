@@ -54,7 +54,12 @@ func (l *Launcher) taskDefinition(session ids.SessionID, accessPoint string) *ec
 			},
 			{
 				Name: aws.String(containerWorker), Image: aws.String(l.cfg.SandboxImage), Essential: aws.Bool(true),
-				DependsOn: []types.ContainerDependency{{ContainerName: aws.String(containerFetch), Condition: types.ContainerConditionSuccess}},
+				// ECS stops containers in reverse of their dependencies, so the sidecar, started
+				// before the worker, stops after it and never stops the item under a live worker.
+				DependsOn: []types.ContainerDependency{
+					{ContainerName: aws.String(containerFetch), Condition: types.ContainerConditionSuccess},
+					{ContainerName: aws.String(containerSidecar), Condition: types.ContainerConditionStart},
+				},
 				// Fargate's limits for both: the handoff wait must end inside the 120 s start
 				// timeout, and ant gets 60 s after SIGTERM to post its result and stop its item.
 				StartTimeout:     aws.Int32(120),

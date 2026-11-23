@@ -37,8 +37,8 @@ spec:
     cd /tmp
     curl -fsSLo gvisor.tar.bz2 "https://storage.googleapis.com/gvisor/releases/release/$release/aarch64/gvisor.tar.bz2"
     echo "$sha512  gvisor.tar.bz2" | sha512sum -c -
-    tar -xjf gvisor.tar.bz2 runsc containerd-shim-runsc-v1
-    install -m 0755 runsc containerd-shim-runsc-v1 /usr/local/bin/
+    # runsc runs the binaries in gvisor-bin/ beside it, so the whole archive goes in one place.
+    tar -xjf gvisor.tar.bz2 --no-same-owner -C /usr/local/bin
 
     --BOUNDARY
     Content-Type: application/node.eks.aws

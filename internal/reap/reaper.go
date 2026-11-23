@@ -47,9 +47,9 @@ func New(cfg Config, items Items, events Events, meter metric.Meter, log *slog.L
 	}, nil
 }
 
-// Run passes at once and then every Interval until ctx ends.
+// Run passes at once and then every Interval until ctx ends. A start holds no record of earlier
+// passes, so the first answers every stopped item; one already answered owes nothing.
 func (r *Reaper) Run(ctx context.Context) error {
-	r.lastPass = time.Now().Add(-r.cfg.Interval)
 	ticker := time.NewTicker(r.cfg.Interval)
 	defer ticker.Stop()
 	for {
@@ -98,7 +98,8 @@ func (r *Reaper) reap(ctx context.Context, now time.Time, it Item) {
 		}
 		r.reaped.Add(ctx, 1)
 		stopped = s
-	case it.State == StateStopped && (it.StoppedAt.After(r.lastPass) || r.retry[it.Session]):
+	// agentd's clock stamps StoppedAt; an interval of overlap absorbs its lag behind this one.
+	case it.State == StateStopped && (it.StoppedAt.After(r.lastPass.Add(-r.cfg.Interval)) || r.retry[it.Session]):
 		stopped = Stopped{item: it}
 	default:
 		return

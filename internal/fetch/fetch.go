@@ -116,7 +116,8 @@ func write(cfg Config, it item) error {
 	if err := os.Chown(cfg.Dir, os.Getuid(), cfg.GID); err != nil {
 		return err
 	}
-	if err := os.Chmod(cfg.Dir, 0o775); err != nil {
+	// Sticky, so the worker's group can add files beside work-item but not rename or replace it.
+	if err := os.Chmod(cfg.Dir, os.ModeSticky|0o775); err != nil {
 		return err
 	}
 	fields := [][2]string{

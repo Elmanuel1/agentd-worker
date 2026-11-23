@@ -71,18 +71,25 @@ func New(ctx context.Context, cli *client.Client, cfg Config, log *slog.Logger) 
 		return nil, err
 	}
 	byRole := map[ids.SessionID]map[string]string{}
-	created := map[ids.SessionID]bool{}
+	created, unfetched := map[ids.SessionID]bool{}, map[ids.SessionID]bool{}
 	for _, c := range containers {
 		s := ids.SessionID(c.Labels[labelSession])
 		if byRole[s] == nil {
 			byRole[s] = map[string]string{}
 		}
-		byRole[s][c.Labels[labelRole]] = c.ID
-		created[s] = created[s] || (c.Labels[labelRole] == roleWorker && c.State == container.StateCreated)
+		role := c.Labels[labelRole]
+		byRole[s][role] = c.ID
+		created[s] = created[s] || (role == roleWorker && c.State == container.StateCreated)
+		unfetched[s] = unfetched[s] || (role == roleFetch && c.State == container.StateCreated)
 	}
-	// A worker not started yet waits on its fetch, as at launch; any other is watched until it
-	// exits, at once when it already has.
+	// A sandbox whose fetch never started lost its nonce with the earlier launch, so it is
+	// removed. A worker not started yet waits on its fetch, as at launch; any other is watched
+	// until it exits, at once when it already has.
 	for s, roles := range byRole {
+		if unfetched[s] {
+			l.wg.Go(func() { l.remove(watch, s, roles) })
+			continue
+		}
 		if created[s] {
 			l.wg.Go(func() { l.startWorker(watch, s, roles) })
 			continue
@@ -127,7 +134,7 @@ func (l *Launcher) Launch(ctx context.Context, session ids.SessionID, nonce ids.
 // startWorker starts the worker once fetch exits 0, then watches it; a fetch that fails removes
 // the sandbox at once.
 func (l *Launcher) startWorker(ctx context.Context, session ids.SessionID, byRole map[string]string) {
-	code, err := l.wait(ctx, byRole[roleFetch])
+	code, err := l.waitExit(ctx, byRole[roleFetch])
 	if ctx.Err() != nil {
 		return
 	}
@@ -150,7 +157,7 @@ const sidecarGrace = 15
 // watchWorker stops the sidecar when the worker exits, so it stops the item, then removes the
 // sandbox's containers.
 func (l *Launcher) watchWorker(ctx context.Context, session ids.SessionID, byRole map[string]string) {
-	code, err := l.wait(ctx, byRole[roleWorker])
+	code, err := l.waitExit(ctx, byRole[roleWorker])
 	if ctx.Err() != nil || err != nil {
 		return
 	}
@@ -162,8 +169,27 @@ func (l *Launcher) watchWorker(ctx context.Context, session ids.SessionID, byRol
 	l.remove(ctx, session, byRole)
 }
 
-func (l *Launcher) wait(ctx context.Context, id string) (int64, error) {
-	wait := l.cli.ContainerWait(ctx, id, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
+// waitExit waits for the container to exit. An engine error waits again, after up to 30 s, so a
+// lost connection does not end the watch; a container gone, or ctx ending, does.
+func (l *Launcher) waitExit(ctx context.Context, id string) (int64, error) {
+	delay := time.Second
+	for {
+		code, err := l.wait(ctx, id, container.WaitConditionNotRunning)
+		if err == nil || ctx.Err() != nil || cerrdefs.IsNotFound(err) {
+			return code, err
+		}
+		l.log.Warn("waiting on a sandbox container failed; waiting again", "container", id, "error", err)
+		select {
+		case <-ctx.Done():
+			return -1, ctx.Err()
+		case <-time.After(delay):
+		}
+		delay = min(2*delay, 30*time.Second)
+	}
+}
+
+func (l *Launcher) wait(ctx context.Context, id string, until container.WaitCondition) (int64, error) {
+	wait := l.cli.ContainerWait(ctx, id, client.ContainerWaitOptions{Condition: until})
 	select {
 	case res := <-wait.Result:
 		return res.StatusCode, nil

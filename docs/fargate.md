@@ -3,14 +3,18 @@
 Off Kubernetes, `agentd-worker scale` claims each item as Anthropic's dispatcher does and runs a
 Fargate task for it. `deploy/fargate` is the Terraform for one environment.
 
-1. **Network.** A VPC with private subnets, interface endpoints for ECR (`ecr.api`, `ecr.dkr`) and
-   CloudWatch Logs, and an S3 gateway endpoint. Sandboxes have no route to the internet: their
-   security group allows outbound only to the proxy, agentd, the controller's handoff port, EFS and
-   those endpoints. S3's prefix list covers every bucket in the region, so the gateway endpoint's
-   policy must allow only ECR's layer bucket, `arn:aws:s3:::prod-<region>-starport-layer-bucket/*`;
-   a Terraform check fails the plan when it allows more.
+1. **Network.** A VPC with private subnets and no route to the internet, an S3 gateway endpoint,
+   and interface endpoints with private DNS for ECR (`ecr.api`, `ecr.dkr`) and CloudWatch Logs,
+   which tasks pull and log through, and for Secrets Manager, ECS and EFS (`elasticfilesystem`),
+   which the controller calls. The endpoints' security group must allow TCP 443 from the
+   `controller_security_group_id` and `sandbox_security_group_id` outputs. A sandbox's security
+   group allows outbound only to the proxy, agentd, the controller's handoff port, EFS and those
+   endpoints. S3's prefix list covers every bucket in the region, so the gateway endpoint's policy
+   must allow only ECR's layer bucket, `arn:aws:s3:::prod-<region>-starport-layer-bucket/*`; a
+   Terraform check fails the plan when it allows more.
 2. **Images.** Push agentd-worker's image (`image/controller`) and the sandbox image
-   (`image/sandbox`, built with the proxy for our cloud) to ECR, and pass both by digest.
+   (`image/sandbox`, built with the proxy for our cloud) to ECR, and pass both by digest. Each
+   execution role pulls only those repositories.
 3. **Key.** Store the environment key, or agentd's runtime key with `environment_id = "runtime"`,
    in Secrets Manager and pass its ARN.
 4. **Apply.** `terraform apply` with the variables in `variables.tf`. It makes the cluster, the
@@ -19,7 +23,9 @@ Fargate task for it. `deploy/fargate` is the Terraform for one environment.
 
 **Known gap: DNS.** A task reaches the VPC's DNS server, which security groups cannot filter, and
 a lookup can carry data in the name it asks for. Closing it takes Route 53 Resolver DNS Firewall on
-the VPC, allowing only agentd's, the proxy's and the controller's names.
+the VPC, allowing only agentd's, the proxy's and the controller's names and the endpoints' service
+names: `ecr.api`, `ecr.dkr`, `s3`, `logs`, `secretsmanager`, `ecs` and `elasticfilesystem` under
+`<region>.amazonaws.com`, and ECR's layer bucket.
 
 ## Quotas
 

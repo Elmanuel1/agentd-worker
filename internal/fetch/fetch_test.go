@@ -70,6 +70,13 @@ func TestRun(t *testing.T) {
 
 func checkFiles(t *testing.T, dir string) {
 	t.Helper()
+	shared, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shared.Mode()&os.ModeSticky == 0 || shared.Mode().Perm() != 0o775 {
+		t.Errorf("shared directory %v: want sticky 0775, so the worker cannot replace work-item", shared.Mode())
+	}
 	want := map[string]string{"session_id": "sesn_1", "work_id": "sesn_1", "environment_id": "env_1", "base_url": "https://agentd.test", "secret": "s3cret"}
 	for name, value := range want {
 		path := filepath.Join(dir, "work-item", name)

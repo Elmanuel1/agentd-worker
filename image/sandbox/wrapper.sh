@@ -23,7 +23,7 @@ payload() {
 # Each entry becomes an export; a name that is not a shell name, or that would replace the
 # worker's own ANTHROPIC_* settings, is skipped.
 exports="$(payload | jq -r '(.environment_variables // {}) | to_entries[]
-	| select(.key | test("^[A-Za-z_][A-Za-z0-9_]*$"))
+	| select(.key | test("\\A[A-Za-z_][A-Za-z0-9_]*\\z"))
 	| select(.key | startswith("ANTHROPIC_") | not)
 	| "export \(.key)=\(.value | @sh)"')"
 eval "$exports"

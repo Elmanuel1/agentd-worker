@@ -109,7 +109,7 @@ func (c *Controller) Run(ctx context.Context) error {
 func (c *Controller) handle(ctx context.Context, polled Polled) {
 	session := polled.session
 	if !c.begin(session) {
-		c.log.Info("item redelivered while its sandbox is collecting it; waiting", "session_id", session)
+		c.log.Info("item redelivered while its session is being handled; waiting", "session_id", session)
 		return
 	}
 	defer c.end(session)
@@ -146,7 +146,7 @@ func (c *Controller) handle(ctx context.Context, polled Polled) {
 	collected, err := launched.Collect(ctx, c.cfg.HandoffWait, c.store, c.launcher)
 	if errors.Is(err, ErrHandoffTimeout) {
 		c.metrics.timeouts.Add(context.WithoutCancel(ctx), 1)
-		c.log.Warn("sandbox did not collect its item; stopped it", "session_id", session, "error", err)
+		c.log.Warn("sandbox did not collect its item; stopping it", "session_id", session, "error", err)
 		return
 	}
 	if err != nil {

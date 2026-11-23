@@ -82,25 +82,54 @@ func addressOf(tasks []ecstypes.Task, err error) (netip.Addr, bool, error) {
 	return netip.Addr{}, running, err
 }
 
+// Stop stops the session's tasks and returns once they have, so no later task shares the
+// workspace with one still shutting down. The task a Launch ran stays known until then, so a
+// retry after an interrupted wait waits for it too.
 func (l *Launcher) Stop(ctx context.Context, session ids.SessionID) error {
 	l.mu.Lock()
-	delete(l.tasks, session)
+	known := l.tasks[session]
 	l.mu.Unlock()
 	tasks, err := l.listTasks(ctx, session)
 	if err != nil {
 		return err
 	}
+	var arns []string
+	if known != "" {
+		arns = append(arns, known)
+	}
 	var errs []error
 	for _, t := range tasks {
 		_, err := l.ecs.StopTask(ctx, &ecs.StopTaskInput{Cluster: aws.String(l.cfg.Cluster), Task: t.TaskArn, Reason: aws.String("agentd-worker stopped the sandbox")})
 		errs = append(errs, err)
+		if arn := aws.ToString(t.TaskArn); arn != known {
+			arns = append(arns, arn)
+		}
 	}
-	return errors.Join(errs...)
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
+	if err := l.waitStopped(ctx, arns); err != nil {
+		return err
+	}
+	l.mu.Lock()
+	if l.tasks[session] == known {
+		delete(l.tasks, session)
+	}
+	l.mu.Unlock()
+	return nil
 }
 
-// Release stops the session's tasks and deletes its access point, its directory and its family.
+// Release stops the session's tasks and deletes its directory, its family and its access point.
+// The access point goes last: it is what List finds the session by, so a failure before it
+// leaves the session listed for the next pass to finish.
 func (l *Launcher) Release(ctx context.Context, session ids.SessionID) error {
 	if err := l.Stop(ctx, session); err != nil {
+		return err
+	}
+	if err := l.dirs.RemoveAll(path.Join(l.cfg.RootMount, sessionDir(session))); err != nil {
+		return fmt.Errorf("removing the session's directory: %w", err)
+	}
+	if err := l.deleteFamily(ctx, session); err != nil {
 		return err
 	}
 	points, err := l.accessPoints(ctx)
@@ -112,8 +141,5 @@ func (l *Launcher) Release(ctx context.Context, session ids.SessionID) error {
 			return fmt.Errorf("deleting access point %s: %w", id, err)
 		}
 	}
-	if err := l.dirs.RemoveAll(path.Join(l.cfg.RootMount, sessionDir(session))); err != nil {
-		return fmt.Errorf("removing the session's directory: %w", err)
-	}
-	return l.deleteFamily(ctx, session)
+	return nil
 }

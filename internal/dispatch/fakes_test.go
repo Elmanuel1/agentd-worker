@@ -79,12 +79,14 @@ func (q *fakeQueue) state() (int, []ids.WorkID) {
 
 // fakeBackend is a Launcher and a Locator over an in-memory set of sandboxes.
 type fakeBackend struct {
-	mu       sync.Mutex
-	running  map[ids.SessionID]bool
-	nonces   map[ids.SessionID]ids.Nonce
-	launched []ids.SessionID
-	stopped  []ids.SessionID
-	released []ids.SessionID
+	mu      sync.Mutex
+	running map[ids.SessionID]bool
+	// listedStopped lists a running sandbox as stopped, as a list taken before its launch does.
+	listedStopped map[ids.SessionID]bool
+	nonces        map[ids.SessionID]ids.Nonce
+	launched      []ids.SessionID
+	stopped       []ids.SessionID
+	released      []ids.SessionID
 }
 
 func newBackend() *fakeBackend {
@@ -104,7 +106,7 @@ func (b *fakeBackend) List(context.Context) ([]Sandbox, error) {
 	defer b.mu.Unlock()
 	var out []Sandbox
 	for s, r := range b.running {
-		out = append(out, Sandbox{Session: s, Running: r})
+		out = append(out, Sandbox{Session: s, Running: r && !b.listedStopped[s]})
 	}
 	return out, nil
 }

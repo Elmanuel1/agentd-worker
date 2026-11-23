@@ -33,8 +33,9 @@ func runScale(ctx context.Context, log *slog.Logger) error {
 	baseURL := e.required("ANTHROPIC_BASE_URL")
 	envID := ids.EnvironmentID(e.required("ANTHROPIC_ENVIRONMENT_ID"))
 	key := ids.NewSecret(e.required("ANTHROPIC_ENVIRONMENT_KEY"))
+	launcher := e.str("AGENTD_WORKER_LAUNCHER", "docker")
 	cfg := dispatch.Config{
-		HandoffWait:     e.seconds("AGENTD_HANDOFF_WAIT_SECONDS", 120),
+		HandoffWait:     e.seconds("AGENTD_HANDOFF_WAIT_SECONDS", defaultHandoffWait(launcher)),
 		MaxSandboxes:    e.number("AGENTD_MAX_SANDBOXES", 100, 1),
 		ReleaseInterval: e.seconds("AGENTD_RELEASE_INTERVAL_SECONDS", 600),
 		Retention:       time.Duration(e.number("AGENTD_RETENTION_DAYS", 0, 0)) * 24 * time.Hour,
@@ -47,7 +48,6 @@ func runScale(ctx context.Context, log *slog.Logger) error {
 		handoffURL: e.required("AGENTD_HANDOFF_URL"), handoffCA: e.required("AGENTD_HANDOFF_CA"), handoffWait: cfg.HandoffWait,
 		sandboxImage: e.required("AGENTD_SANDBOX_IMAGE"), toolImage: e.required("AGENTD_TOOL_IMAGE"),
 	}
-	launcher := e.str("AGENTD_WORKER_LAUNCHER", "docker")
 	if err := e.err(); err != nil {
 		return err
 	}

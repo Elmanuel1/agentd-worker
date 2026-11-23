@@ -14,11 +14,6 @@ resource "aws_iam_role" "execution" {
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks.json
 }
 
-resource "aws_iam_role_policy_attachment" "execution" {
-  role       = aws_iam_role.execution.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-}
-
 resource "aws_iam_role_policy" "execution_secret" {
   name = "controller-secrets"
   role = aws_iam_role.execution.id
@@ -38,9 +33,44 @@ resource "aws_iam_role" "sandbox_execution" {
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks.json
 }
 
-resource "aws_iam_role_policy_attachment" "sandbox_execution" {
-  role       = aws_iam_role.sandbox_execution.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+locals {
+  ecr_image = "^(?P<account>[0-9]{12})\\.dkr\\.ecr\\.(?P<region>[a-z0-9-]+)\\.amazonaws\\.com/(?P<repository>[^@:]+)"
+  repositories = {
+    for name, image in { controller = var.controller_image, sandbox = var.sandbox_image } :
+    name => format("arn:aws:ecr:%s:%s:repository/%s", regex(local.ecr_image, image).region, regex(local.ecr_image, image).account, regex(local.ecr_image, image).repository)
+  }
+  # The controller's tasks run its image; a sandbox's run both, fetch and the sidecar from the controller's.
+  pulls = {
+    execution         = { role = aws_iam_role.execution.id, repositories = [local.repositories.controller], log_group = aws_cloudwatch_log_group.controller.arn }
+    sandbox_execution = { role = aws_iam_role.sandbox_execution.id, repositories = values(local.repositories), log_group = aws_cloudwatch_log_group.sandboxes.arn }
+  }
+}
+
+# The execution roles pull only their images' repositories and write only their own log group.
+data "aws_iam_policy_document" "pull" {
+  for_each = local.pulls
+  statement {
+    sid       = "Token"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+  statement {
+    sid       = "Images"
+    actions   = ["ecr:BatchCheckLayerAvailability", "ecr:GetDownloadUrlForLayer", "ecr:BatchGetImage"]
+    resources = distinct(each.value.repositories)
+  }
+  statement {
+    sid       = "Logs"
+    actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["${each.value.log_group}:*"]
+  }
+}
+
+resource "aws_iam_role_policy" "pull" {
+  for_each = local.pulls
+  name     = "pull-and-log"
+  role     = each.value.role
+  policy   = data.aws_iam_policy_document.pull[each.key].json
 }
 
 # The sandbox task's role holds no permission: a tool call that reaches the task's credentials
@@ -75,8 +105,14 @@ data "aws_iam_policy_document" "controller" {
   }
   statement {
     sid       = "TaskDefinitions"
-    actions   = ["ecs:ListTasks", "ecs:RegisterTaskDefinition", "ecs:DeregisterTaskDefinition", "ecs:DeleteTaskDefinitions", "ecs:DescribeTaskDefinition", "ecs:ListTaskDefinitions"]
+    actions   = ["ecs:ListTasks", "ecs:RegisterTaskDefinition", "ecs:DeregisterTaskDefinition", "ecs:DescribeTaskDefinition", "ecs:ListTaskDefinitions"]
     resources = ["*"]
+  }
+  # Unlike the rest, deleting takes a task definition ARN, so it reaches only the sandboxes' families.
+  statement {
+    sid       = "DeleteRevisions"
+    actions   = ["ecs:DeleteTaskDefinitions"]
+    resources = ["arn:aws:ecs:${local.region}:${local.account}:task-definition/agentd-*"]
   }
   # Tags on RegisterTaskDefinition are authorised as ecs:TagResource.
   statement {

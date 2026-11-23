@@ -15,9 +15,11 @@ grep '^FROM' "$dockerfile" | grep -v -e '^FROM \${BASE}' -e '^FROM scratch AS no
 	fail "a FROM other than the pinned base"
 
 docker pull -q "$base" >/dev/null
-layers() { docker image inspect -f '{{len .RootFS.Layers}}' "$1"; }
+layers() { docker image inspect -f '{{range .RootFS.Layers}}{{println .}}{{end}}' "$1" | sed '/^$/d'; }
 steps() { docker history --no-trunc --format '{{.CreatedBy}}' "$1"; }
-added=$(($(layers "$image") - $(layers "$base")))
+from=$(layers "$base" | wc -l)
+[ "$(layers "$image" | head -n "$from")" = "$(layers "$base")" ] || fail "the image's first layers are not the pinned base's"
+added=$(($(layers "$image" | wc -l) - from))
 [ "$added" -eq 4 ] || fail "the image adds $added layers, want 4"
 new=$(($(steps "$image" | wc -l) - $(steps "$base" | wc -l)))
 steps "$image" | head -n "$new" | grep -Ev '^(COPY|ENV|ARG) ' && fail "a step that is not COPY, ENV or ARG"

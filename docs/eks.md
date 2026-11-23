@@ -15,6 +15,10 @@ pointed at agentd. agentd-worker adds the sandbox image, the egress rules, the n
      drift to one node in ten at a time; a spot reclaim ignores it.
 
    Both pools are named `agentd-sandboxes`, so applying the other one switches the cluster over.
+
+   Then install the Agent Sandbox controller the chart creates its sandboxes through, with its
+   extensions, from release v1.0.1, the one Anthropic's recipe runs on: `kubectl apply -f` that
+   release's `sandbox.yaml` and `extensions.yaml`, with the controller's image pinned by digest.
 2. **Images.** Build `image/sandbox` with the proxy's address and CA for our cloud
    (`--build-arg AGENTD_PROXY_URL=... --build-arg AGENTD_CLOUD=1 --build-context proxy-ca=<dir>`),
    or without them for a self-hosted environment. Push it to your registry as `agentd-sandbox`, and
@@ -23,10 +27,11 @@ pointed at agentd. agentd-worker adds the sandbox image, the egress rules, the n
    `ANTHROPIC_ENVIRONMENT_ID` and `ANTHROPIC_ENVIRONMENT_KEY`. For our cloud the id is `runtime`
    and the key is agentd's runtime key; for a self-hosted environment, its id and environment key.
    Then the dispatcher's TLS Secret and CA ConfigMap, as the chart's README describes.
-4. **Chart.** Install it with `deploy/eks/values.yaml`, setting `image.registry`, both digests and
+4. **Egress.** Apply `deploy/eks/networkpolicy-proxy.yaml`, so sandboxes reach the proxy, and
+   `deploy/eks/cilium-egress.yaml` with agentd's CIDR, so they reach nothing else in public. Both
+   go in before the chart, so no sandbox runs before they hold.
+5. **Chart.** Install it with `deploy/eks/values.yaml`, setting `image.registry`, both digests and
    `egress.cmaServer.cidr` to agentd's address.
-5. **Egress.** Apply `deploy/eks/networkpolicy-proxy.yaml`, so sandboxes reach the proxy, and
-   `deploy/eks/cilium-egress.yaml` with agentd's CIDR, so they reach nothing else in public.
 6. **Reaper.** Apply `deploy/eks/reaper.yaml` with agentd-worker's image. It reads the same Secret,
    and answers the tool calls of a pod that died without its own shutdown.
 

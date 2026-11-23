@@ -94,7 +94,8 @@ func TestPass(t *testing.T) {
 		{"beating item is left alone", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-time.Minute)}, nil, nil},
 		{"unacked item is left to reclaim", Item{Work: "w", Session: "s", State: StateStarting}, nil, nil},
 		{"recently stopped is answered (RP-2)", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-30 * time.Second)}, nil, []string{"send s [tu_2 tu_3]"}},
-		{"stopped before the last pass is left", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-2 * time.Minute)}, nil, nil},
+		{"stopped within an interval before the last pass, by a lagging clock, is answered", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-90 * time.Second)}, nil, []string{"send s [tu_2 tu_3]"}},
+		{"stopped an interval before the last pass is left", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-2 * time.Minute)}, nil, nil},
 		{"a stopping item whose worker died is stopped", Item{Work: "w", Session: "s", State: StateStopping, Beat: now.Add(-7 * time.Minute)}, nil, []string{"stop w", "send s [tu_2 tu_3]"}},
 		{"a 409 is already stopped, and the calls are answered", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, conflict{}, []string{"stop w", "send s [tu_2 tu_3]"}},
 		{"a failed stop answers nothing", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, errors.New("503"), []string{"stop w"}},
@@ -109,6 +110,16 @@ func TestPass(t *testing.T) {
 				t.Errorf("calls %v, want %v", f.calls, c.want)
 			}
 		})
+	}
+}
+
+// TestFirstPassAnswersEveryStoppedItem holds RP-2 across a restart: a failed answer before it is
+// answered by the first pass after it.
+func TestFirstPassAnswersEveryStoppedItem(t *testing.T) {
+	f := &fakeAgentd{items: []Item{{Work: "w", Session: "s", State: StateStopped, StoppedAt: time.Now().Add(-time.Hour)}}, events: map[ids.SessionID][]Event{"s": owes}}
+	newReaper(t, f).Pass(t.Context())
+	if want := []string{"send s [tu_2 tu_3]"}; !slices.Equal(f.calls, want) {
+		t.Errorf("calls %v, want %v", f.calls, want)
 	}
 }
 

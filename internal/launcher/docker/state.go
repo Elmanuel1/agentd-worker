@@ -86,9 +86,13 @@ func (l *Launcher) Stop(ctx context.Context, session ids.SessionID) error {
 		}
 	}
 	for _, c := range containers {
-		// A conflict is a removal already under way, by this sandbox's own watcher.
 		_, err := l.cli.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true})
-		if err != nil && !cerrdefs.IsNotFound(err) && !cerrdefs.IsConflict(err) {
+		// A conflict is a removal already under way, by this sandbox's own watcher; the run
+		// volume goes only once it ends.
+		if cerrdefs.IsConflict(err) {
+			_, err = l.wait(ctx, c.ID, container.WaitConditionRemoved)
+		}
+		if err != nil && !cerrdefs.IsNotFound(err) {
 			errs = append(errs, fmt.Errorf("removing container %s: %w", c.ID, err))
 		}
 	}

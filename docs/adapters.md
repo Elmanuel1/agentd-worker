@@ -14,7 +14,8 @@ has these methods, returned as a concrete type from its constructor:
 
 Every call is safe to repeat and safe on a session the backend has never seen. A sandbox holds no
 environment or runtime key, no host path, no host namespace, no added capability and no cloud
-credential that grants anything.
+credential that grants anything. The one host path is Docker's under `runsc`: a read-only
+`/etc/resolv.conf` naming the DNS relay.
 
 Then pass the shared suite, `internal/launcher/launchertest`, against the backend or a faithful
 fake of its API. The suite also takes a `Count` that reads, from the backend itself, how many

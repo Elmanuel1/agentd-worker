@@ -28,9 +28,12 @@ func Serve(ctx context.Context, addr, upstream string, log *slog.Logger) error {
 		packets.Close()
 		return err
 	}
+	closeAll := func() { packets.Close(); streams.Close() }
 	var wg sync.WaitGroup
 	defer wg.Wait()
-	stop := context.AfterFunc(ctx, func() { packets.Close(); streams.Close() })
+	// Runs before the wait on every return, so relayPackets ends however Accept failed.
+	defer closeAll()
+	stop := context.AfterFunc(ctx, closeAll)
 	defer stop()
 	slots := newLimit(inFlight, log)
 	wg.Go(func() { relayPackets(packets, upstream, slots, log, &wg) })

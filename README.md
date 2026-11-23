@@ -16,10 +16,18 @@ docker build -t agentd-sandbox image/sandbox
 docker network create agentd-sandboxes
 ```
 
-Run the controller on the host with the settings in [docs/configuration.md](docs/configuration.md):
-agentd's URL and the environment's id and key, `AGENTD_DOCKER_NETWORK=agentd-sandboxes`, both images,
-and a handoff certificate whose name sandboxes reach on that network. Sandboxes run under `runsc`
-(gVisor) by default; the controller refuses to start when the engine lacks it.
+Install the controller on the host. `go install` puts it in `$(go env GOBIN)`, or
+`$(go env GOPATH)/bin` when `GOBIN` is unset, which must be on `PATH`:
+
+```sh
+go install ./cmd/agentd-worker
+```
+
+Run it with the settings in [docs/configuration.md](docs/configuration.md): agentd's URL and the
+environment's id and key, `AGENTD_DOCKER_NETWORK=agentd-sandboxes`, both images, a handoff
+certificate whose name sandboxes reach on that network, and an `AGENTD_DOCKER_STATE_DIR` the
+controller's user can write. Sandboxes run under `runsc` (gVisor) by default; the controller
+refuses to start when the engine lacks it.
 
 ```sh
 agentd-worker scale

@@ -56,10 +56,6 @@ jobs:
       AGENTD_TOOL_IMAGE: agentd-worker:ci
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
-        with:
-          repository: Elmanuel1/agentd
-          path: agentd
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -67,13 +63,22 @@ jobs:
         with:
           python-version: "3.12"
       - name: agentd's binary from its latest arm64 build of main
+        id: agentd
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          run=$(gh run list -R Elmanuel1/agentd -w "arm64 binaries" -b main -s success -L 1 --json databaseId -q '.[0].databaseId')
+          found=$(gh run list -R Elmanuel1/agentd -w "arm64 binaries" -b main -s success -L 1 --json databaseId,headSha -q '.[0] | "\(.databaseId) \(.headSha)"')
+          run=${found% *} sha=${found#* }
           gh run download "$run" -R Elmanuel1/agentd -n agentd-linux-arm64 -D agentd-bin
           tar -xzf agentd-bin/agentd-linux-arm64.tar.gz -C agentd-bin
-          echo "agentd from run $run of $(git -C agentd rev-parse --short HEAD)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "agentd from run $run of $sha"
+      # The migrations and helpers come from the commit the binary was built from.
+      - uses: actions/checkout@v4
+        with:
+          repository: Elmanuel1/agentd
+          ref: ${{ steps.agentd.outputs.sha }}
+          path: agentd
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
@@ -94,9 +99,11 @@ jobs:
             flyway/flyway:11 -url=jdbc:postgresql://localhost:5432/agentd -user=agentd -password=agentd \
             -locations=filesystem:/flyway/sql -postgresql.transactional.lock=false migrate
       - name: Start a one-node Valkey cluster and the change feed, as agentd's CI does
+        # start-ci.sh mounts its config from the directory it runs in.
+        working-directory: agentd
         run: |
-          agentd/docker/valkey/start-cluster.sh 7001
-          agentd/docker/debezium/start-ci.sh "${{ job.services.postgres.id }}" redis localhost:7001 true
+          docker/valkey/start-cluster.sh 7001
+          docker/debezium/start-ci.sh "${{ job.services.postgres.id }}" redis localhost:7001 true
       - name: Start the scripted model
         run: nohup python3 agentd/conformance/mock_model.py --port 18766 --model mock/scripted e2e/model.json > model.log 2>&1 &
       - name: Give agentd its keys, and make a workspace key

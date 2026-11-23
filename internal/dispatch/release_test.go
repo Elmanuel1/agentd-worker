@@ -11,8 +11,8 @@ import (
 )
 
 // TestReleaseEndedSessions holds SC-9: a deleted or archived session is released, and with a
-// retention set, one idle past it with no running sandbox; any other, or one agentd cannot
-// answer for, keeps its storage.
+// retention set, one idle past it with no running sandbox; any other, one agentd cannot answer
+// for, one whose item is being handled, or one listed as stopped that runs again, keeps its storage.
 func TestReleaseEndedSessions(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		old := time.Now().Add(-48 * time.Hour)
@@ -24,13 +24,17 @@ func TestReleaseEndedSessions(t *testing.T) {
 			"sesn_idle_new":     Session{Idle: true, Since: time.Now()},
 			"sesn_live":         Session{},
 			"sesn_err":          context.DeadlineExceeded,
+			"sesn_handled":      Session{Gone: true},
+			"sesn_relaunched":   Session{Idle: true, Since: old},
 		}
 		withRetention := cfg
 		withRetention.Retention = 24 * time.Hour
 		r := newRig(t, withRetention, sessions)
 		for s := range sessions {
-			r.backend.running[s] = s == "sesn_idle_running"
+			r.backend.running[s] = s == "sesn_idle_running" || s == "sesn_relaunched"
 		}
+		r.backend.listedStopped = map[ids.SessionID]bool{"sesn_relaunched": true}
+		r.ctrl.begin("sesn_handled")
 		ctx, cancel := context.WithCancel(t.Context())
 		go r.ctrl.Release(ctx)
 		time.Sleep(cfg.ReleaseInterval - time.Second)
