@@ -86,7 +86,7 @@ func TestSettings(t *testing.T) {
 	if err := envconfig.Process("", &s); err != nil {
 		t.Fatal(err)
 	}
-	cfg, reap := dispatchConfig(s, launcher{}), s.ReapSettings.config()
+	cfg, reap := dispatchConfig(s, backendKind{}), s.ReapSettings.config()
 	if cfg.MaxSandboxes != 100 || cfg.ReleaseInterval != 10*time.Minute || cfg.Retention != 0 || reap.Interval != time.Minute || reap.StaleAfter != 6*time.Minute {
 		t.Errorf("defaults %+v, %+v", cfg, reap)
 	}

@@ -18,6 +18,7 @@ import (
 
 	"github.com/Elmanuel1/agentd-worker/internal/fetch"
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
+	"github.com/Elmanuel1/agentd-worker/internal/launcher"
 )
 
 const (
@@ -58,11 +59,9 @@ type Config struct {
 	WorkerUID, WorkerGID int64
 	// TaskRoleARN names a role with no permission; ExecutionRoleARN pulls images and writes logs.
 	ExecutionRoleARN, TaskRoleARN string
-	SandboxImage, ToolImage       string
 	CPU, Memory                   string
 	LogGroup, Region              string
-	HandoffURL, HandoffCA         string
-	HandoffWait                   time.Duration
+	launcher.Sandbox
 }
 
 // Launcher runs sandboxes as Fargate tasks.

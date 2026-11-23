@@ -21,7 +21,7 @@ func (s *seconds) UnmarshalText(text []byte) error {
 type AgentdSettings struct {
 	BaseURL       string            `envconfig:"ANTHROPIC_BASE_URL" required:"true"`
 	EnvironmentID ids.EnvironmentID `envconfig:"ANTHROPIC_ENVIRONMENT_ID" required:"true"`
-	Key           ids.Secret        `envconfig:"ANTHROPIC_ENVIRONMENT_KEY" required:"true"`
+	Key           ids.Key           `envconfig:"ANTHROPIC_ENVIRONMENT_KEY" required:"true"`
 }
 
 // ReapSettings are the reaper's, in the controller or alone.

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Elmanuel1/agentd-worker/internal/dispatch"
+	"github.com/Elmanuel1/agentd-worker/internal/launcher"
 	"github.com/Elmanuel1/agentd-worker/internal/launcher/fargate"
 )
 
@@ -20,28 +21,21 @@ type backend interface {
 	Close()
 }
 
-// sandboxConfig is what every backend gives the sandboxes it launches.
-type sandboxConfig struct {
-	handoffURL, handoffCA   string
-	handoffWait             time.Duration
-	sandboxImage, toolImage string
-}
-
-// launcher is one backend the controller runs sandboxes on: the handoff wait it defaults to, and
+// backendKind is one backend the controller runs sandboxes on: the handoff wait it defaults to, and
 // how to open it, which reads the backend's own settings.
-type launcher struct {
+type backendKind struct {
 	handoffWait time.Duration
-	open        func(ctx context.Context, sc sandboxConfig, log *slog.Logger) (backend, error)
+	open        func(ctx context.Context, sc launcher.Sandbox, log *slog.Logger) (backend, error)
 }
 
 // launcherNamed is the backend AGENTD_WORKER_LAUNCHER names.
-func launcherNamed(name string) (launcher, error) {
+func launcherNamed(name string) (backendKind, error) {
 	switch name {
 	case "docker":
-		return launcher{handoffWait: 120 * time.Second, open: openDocker}, nil
+		return backendKind{handoffWait: 120 * time.Second, open: openDocker}, nil
 	case "fargate":
-		return launcher{handoffWait: fargate.MaxHandoffWait, open: openFargate}, nil
+		return backendKind{handoffWait: fargate.MaxHandoffWait, open: openFargate}, nil
 	default:
-		return launcher{}, fmt.Errorf("AGENTD_WORKER_LAUNCHER %q: want docker or fargate", name)
+		return backendKind{}, fmt.Errorf("AGENTD_WORKER_LAUNCHER %q: want docker or fargate", name)
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
+	"github.com/Elmanuel1/agentd-worker/internal/launcher"
 	"github.com/Elmanuel1/agentd-worker/internal/launcher/launchertest"
 )
 
@@ -33,15 +34,17 @@ func config(t *testing.T) Config {
 		t.Skip("AGENTD_TEST_DOCKER is not set; the Docker adapter suite runs in CI")
 	}
 	return Config{
-		Network:      network,
-		Runtime:      envOr("AGENTD_TEST_DOCKER_RUNTIME", "runc"),
-		SandboxImage: os.Getenv("AGENTD_TEST_SANDBOX_IMAGE"),
-		ToolImage:    os.Getenv("AGENTD_TEST_TOOL_IMAGE"),
-		// No controller answers here, so fetch keeps retrying and the sandbox stays running.
-		HandoffURL:  "https://127.0.0.1:1",
-		HandoffCA:   testCA(t),
-		HandoffWait: 90 * time.Second,
-		StateDir:    t.TempDir(),
+		Network: network,
+		Runtime: envOr("AGENTD_TEST_DOCKER_RUNTIME", "runc"),
+		Sandbox: launcher.Sandbox{
+			SandboxImage: os.Getenv("AGENTD_TEST_SANDBOX_IMAGE"),
+			ToolImage:    os.Getenv("AGENTD_TEST_TOOL_IMAGE"),
+			// No controller answers here, so fetch keeps retrying and the sandbox stays running.
+			HandoffURL:  "https://127.0.0.1:1",
+			HandoffCA:   testCA(t),
+			HandoffWait: 90 * time.Second,
+		},
+		StateDir: t.TempDir(),
 	}
 }
 

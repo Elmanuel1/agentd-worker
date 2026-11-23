@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/efs"
 	"github.com/kelseyhightower/envconfig"
 
+	"github.com/Elmanuel1/agentd-worker/internal/launcher"
 	"github.com/Elmanuel1/agentd-worker/internal/launcher/fargate"
 )
 
@@ -27,7 +28,7 @@ type FargateSettings struct {
 	Region           string   `envconfig:"AWS_REGION" required:"true"`
 }
 
-func openFargate(ctx context.Context, sc sandboxConfig, _ *slog.Logger) (backend, error) {
+func openFargate(ctx context.Context, sc launcher.Sandbox, _ *slog.Logger) (backend, error) {
 	var s FargateSettings
 	if err := envconfig.Process("", &s); err != nil {
 		return nil, err
@@ -40,8 +41,8 @@ func openFargate(ctx context.Context, sc sandboxConfig, _ *slog.Logger) (backend
 		Cluster: s.Cluster, Subnets: s.Subnets, SecurityGroups: s.SecurityGroups,
 		FileSystemID: s.FileSystemID, RootMount: s.RootMount, WorkerUID: workerUID, WorkerGID: workerGID,
 		ExecutionRoleARN: s.ExecutionRoleARN, TaskRoleARN: s.TaskRoleARN,
-		SandboxImage: sc.sandboxImage, ToolImage: sc.toolImage, CPU: s.CPU, Memory: s.Memory,
+		CPU: s.CPU, Memory: s.Memory,
 		LogGroup: s.LogGroup, Region: s.Region,
-		HandoffURL: sc.handoffURL, HandoffCA: sc.handoffCA, HandoffWait: sc.handoffWait,
+		Sandbox: sc,
 	})
 }

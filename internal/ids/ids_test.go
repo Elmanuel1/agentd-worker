@@ -17,14 +17,18 @@ func TestSecretsPrintRedacted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, v := range map[string]any{"secret": secret, "token": token} {
+	var key Key
+	if err := key.UnmarshalText([]byte("sk-ant-api03-live")); err != nil {
+		t.Fatal(err)
+	}
+	for name, v := range map[string]any{"secret": secret, "token": token, "key": key} {
 		t.Run(name, func(t *testing.T) {
 			var logged bytes.Buffer
 			slog.New(slog.NewJSONHandler(&logged, nil)).Info("x", "v", v)
 			jsonOut, _ := json.Marshal(map[string]any{"v": v})
 			outs := []string{fmt.Sprint(v), fmt.Sprintf("%v %+v %#v %s", v, v, v, v), logged.String(), string(jsonOut)}
 			for _, out := range outs {
-				if strings.Contains(out, "sk-ant") || strings.Contains(out, secret.Reveal()) || !strings.Contains(out, "[redacted]") {
+				if strings.Contains(out, "sk-ant") || strings.Contains(out, secret.Reveal()) || strings.Contains(out, key.Reveal()) || !strings.Contains(out, "[redacted]") {
 					t.Errorf("printed %q", out)
 				}
 			}

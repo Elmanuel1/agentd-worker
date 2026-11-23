@@ -19,14 +19,16 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
+	"github.com/Elmanuel1/agentd-worker/internal/launcher"
 	"github.com/Elmanuel1/agentd-worker/internal/launcher/launchertest"
 )
 
 var cfg = Config{
 	Cluster: "agentd", Subnets: []string{"subnet-1"}, SecurityGroups: []string{"sg-1"}, FileSystemID: "fs-1",
 	RootMount: "/mnt/efs", ExecutionRoleARN: "arn:aws:iam::1:role/exec", TaskRoleARN: "arn:aws:iam::1:role/none",
-	SandboxImage: "sandbox@sha256:1", ToolImage: "agentd-worker@sha256:2", CPU: "512", Memory: "1024",
-	LogGroup: "/agentd/sandboxes", Region: "us-east-1", HandoffURL: "https://controller:8443", HandoffCA: "PEM", HandoffWait: 90 * time.Second, WorkerUID: 1001, WorkerGID: 1000,
+	CPU: "512", Memory: "1024",
+	LogGroup: "/agentd/sandboxes", Region: "us-east-1", WorkerUID: 1001, WorkerGID: 1000,
+	Sandbox: launcher.Sandbox{SandboxImage: "sandbox@sha256:1", ToolImage: "agentd-worker@sha256:2", HandoffURL: "https://controller:8443", HandoffCA: "PEM", HandoffWait: 90 * time.Second},
 }
 
 // open builds a launcher on a file system root of its own, closed when the test ends.

@@ -10,12 +10,12 @@ import (
 	"maps"
 	"slices"
 	"sync"
-	"time"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
+	"github.com/Elmanuel1/agentd-worker/internal/launcher"
 )
 
 // ErrNoRuntime means the engine lacks the runtime sandboxes must run under.
@@ -27,11 +27,7 @@ type Config struct {
 	Network string
 	// Runtime is the OCI runtime sandboxes run under, runsc by default.
 	Runtime string
-	// SandboxImage runs the worker; ToolImage, agentd-worker's own image, runs fetch and the sidecar.
-	SandboxImage, ToolImage string
-	// HandoffURL is the controller's GET /work-item base as sandboxes reach it, HandoffCA its CA in PEM.
-	HandoffURL, HandoffCA string
-	HandoffWait           time.Duration
+	launcher.Sandbox
 	// StateDir holds the resolv.conf sandboxes under runsc mount; it is a path on the engine's host.
 	StateDir string
 }

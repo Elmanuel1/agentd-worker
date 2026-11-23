@@ -14,35 +14,32 @@ const redacted = "[redacted]"
 // ErrNoToken is returned when a work secret carries no sessions token.
 var ErrNoToken = errors.New("work secret carries no sessions token")
 
-// Secret is a work item's secret payload, verbatim. It prints as [redacted].
-type Secret struct{ v string }
-
-func NewSecret(v string) Secret { return Secret{v: v} }
+// hidden is a secret value that prints, logs and marshals as [redacted].
+type hidden struct{ v string }
 
 // Reveal returns the value, for the one place that must send it.
-func (s Secret) Reveal() string { return s.v }
+func (h hidden) Reveal() string { return h.v }
 
-// UnmarshalText reads a secret from configuration, so a setting holds it typed.
-func (s *Secret) UnmarshalText(text []byte) error {
-	s.v = string(text)
+func (hidden) String() string               { return redacted }
+func (hidden) GoString() string             { return redacted }
+func (hidden) LogValue() slog.Value         { return slog.StringValue(redacted) }
+func (hidden) MarshalJSON() ([]byte, error) { return json.Marshal(redacted) }
+
+// Secret is a work item's secret payload, verbatim.
+type Secret struct{ hidden }
+
+func NewSecret(v string) Secret { return Secret{hidden{v}} }
+
+// WorkToken is the session's work token, from the secret's sessions_token.
+type WorkToken struct{ hidden }
+
+// Key is a key read from configuration: an environment or runtime key, or a TLS private key.
+type Key struct{ hidden }
+
+func (k *Key) UnmarshalText(text []byte) error {
+	k.v = string(text)
 	return nil
 }
-
-func (Secret) String() string               { return redacted }
-func (Secret) GoString() string             { return redacted }
-func (Secret) LogValue() slog.Value         { return slog.StringValue(redacted) }
-func (Secret) MarshalJSON() ([]byte, error) { return json.Marshal(redacted) }
-
-// WorkToken is the session's work token, from the secret's sessions_token. It prints as [redacted].
-type WorkToken struct{ v string }
-
-// Reveal returns the value, for the Authorization header.
-func (t WorkToken) Reveal() string { return t.v }
-
-func (WorkToken) String() string               { return redacted }
-func (WorkToken) GoString() string             { return redacted }
-func (WorkToken) LogValue() slog.Value         { return slog.StringValue(redacted) }
-func (WorkToken) MarshalJSON() ([]byte, error) { return json.Marshal(redacted) }
 
 // WorkToken decodes the secret's URL-safe base64 JSON, with or without padding, as the SDK's worker does.
 func (s Secret) WorkToken() (WorkToken, error) {
@@ -56,5 +53,5 @@ func (s Secret) WorkToken() (WorkToken, error) {
 	if json.Unmarshal(raw, &payload) != nil || payload.SessionsToken == "" {
 		return WorkToken{}, ErrNoToken
 	}
-	return WorkToken{v: payload.SessionsToken}, nil
+	return WorkToken{hidden{payload.SessionsToken}}, nil
 }

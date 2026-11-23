@@ -4,6 +4,8 @@ import (
 	"maps"
 	"slices"
 	"testing"
+
+	"github.com/Elmanuel1/agentd-worker/internal/launcher"
 )
 
 // TestRoles holds each container role's stop grace and whether it holds the sandbox's address.
@@ -28,7 +30,7 @@ func TestRoles(t *testing.T) {
 // TestCommands holds what each container runs: the worker Anthropic's script, as the chart runs
 // it, since the image's own command is a shell; fetch and the sidecar agentd-worker's subcommands.
 func TestCommands(t *testing.T) {
-	l := &Launcher{cfg: Config{Runtime: runc, SandboxImage: "sandbox", ToolImage: "tool"}}
+	l := &Launcher{cfg: Config{Runtime: runc, Sandbox: launcher.Sandbox{SandboxImage: "sandbox", ToolImage: "tool"}}}
 	want := map[role][]string{roleFetch: {"fetch"}, roleWorker: {"cma-sandbox-worker"}, roleSidecar: {"sidecar"}}
 	got := map[role][]string{}
 	for _, spec := range l.specs("sesn_1", "n1") {

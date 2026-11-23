@@ -32,6 +32,7 @@ func TestSuite(t *testing.T) {
 
 Finally wire the adapter in a file of its own beside `cmd/agentd-worker/docker.go` and
 `fargate.go`: a settings struct tagged for `envconfig` with the environment variables only it
-reads, and an `open` function that builds the adapter from them and the controller's
-`sandboxConfig`. Then name it in `launcherNamed` in `cmd/agentd-worker/launchers.go`, with the
-handoff wait it defaults to. Nothing else changes for a new backend.
+reads, and an `open` function that builds the adapter from them and the `launcher.Sandbox`
+settings every backend's sandboxes share (`internal/launcher`), embedded in the adapter's own
+`Config`. Then name it in `launcherNamed` in `cmd/agentd-worker/launchers.go`, with the handoff
+wait it defaults to. Nothing else changes for a new backend.
