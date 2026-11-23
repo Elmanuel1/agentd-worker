@@ -1,6 +1,7 @@
 package fetch
 
 import (
+	"cmp"
 	"errors"
 	"io"
 	"net/http"
@@ -20,6 +21,8 @@ const body = `{"session_id":"sesn_1","work_id":"sesn_1","environment_id":"env_1"
 // script answers each request with the next status, the last one repeating; 0 is a dial error.
 type script struct {
 	codes []int
+	// body is the item a 200 carries, the whole one when empty.
+	body  string
 	calls int
 	nonce string
 }
@@ -31,7 +34,7 @@ func (s *script) Do(r *http.Request) (*http.Response, error) {
 	if code == 0 {
 		return nil, errors.New("connection refused")
 	}
-	return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader(body))}, nil
+	return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader(cmp.Or(s.body, body)))}, nil
 }
 
 // TestRun holds FE-1 and FE-2.
@@ -41,18 +44,20 @@ func TestRun(t *testing.T) {
 		codes []int
 		err   error
 		took  time.Duration
+		body  string
 	}{
-		{"collected first time", []int{200}, nil, 0},
-		{"retries every 2 s until collected", []int{0, 503, 200}, nil, 4 * time.Second},
-		{"a refusal exits at once", []int{0, 403}, ErrRefused, 2 * time.Second},
-		{"the handoff wait ends it", []int{0}, ErrTimeout, 120 * time.Second},
+		{"collected first time", []int{200}, nil, 0, ""},
+		{"retries every 2 s until collected", []int{0, 503, 200}, nil, 4 * time.Second, ""},
+		{"a refusal exits at once", []int{0, 403}, ErrRefused, 2 * time.Second, ""},
+		{"the handoff wait ends it", []int{0}, ErrTimeout, 120 * time.Second, ""},
+		{"an item missing a field exits at once", []int{200}, ErrMalformed, 0, `{"session_id":"sesn_1"}`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				dir := t.TempDir()
 				cfg := Config{URL: "https://ctl", Nonce: "n1", Dir: dir, UID: os.Getuid(), GID: os.Getgid(), Every: 2 * time.Second, Wait: 120 * time.Second}
-				s := &script{codes: c.codes}
+				s := &script{codes: c.codes, body: c.body}
 				start := time.Now()
 				err := Run(t.Context(), s, cfg)
 				if !errors.Is(err, c.err) || time.Since(start) != c.took || s.nonce != "n1" {

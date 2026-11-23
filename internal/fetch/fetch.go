@@ -38,6 +38,9 @@ var (
 	ErrRefused = errors.New("the controller refused the work item")
 	// ErrTimeout means the handoff wait passed with no item.
 	ErrTimeout = errors.New("no work item within the handoff wait")
+	// ErrMalformed means the controller answered with an item missing a field; asking again gets
+	// the same.
+	ErrMalformed = errors.New("the work item is missing a field")
 )
 
 // Doer sends the GET /work-item request.
@@ -69,7 +72,7 @@ func Run(ctx context.Context, client Doer, cfg Config) error {
 		if err == nil {
 			return write(cfg, it)
 		}
-		if errors.Is(err, ErrRefused) {
+		if errors.Is(err, ErrRefused) || errors.Is(err, ErrMalformed) {
 			return err
 		}
 		if !time.Now().Before(deadline) {
@@ -108,7 +111,7 @@ func get(ctx context.Context, client Doer, cfg Config) (handoff.Item, error) {
 		return handoff.Item{}, fmt.Errorf("decoding work item: %w", err)
 	}
 	if _, err := ids.ParseSessionID(string(it.SessionID)); err != nil || it.WorkID == "" || it.EnvironmentID == "" || it.BaseURL == "" || it.Secret == "" {
-		return handoff.Item{}, errors.Join(ErrRefused, errors.New("work item is missing a field"))
+		return handoff.Item{}, ErrMalformed
 	}
 	return it, nil
 }
