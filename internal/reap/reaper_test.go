@@ -98,7 +98,7 @@ func TestPass(t *testing.T) {
 		// log is the session's events, owes when nil.
 		log  []Event
 		want []string
-		// stoppedAt is the stop agentd records, in its own clock; zero for none.
+		// stoppedAt is the stop agentd records, in its own clock; zero lets the fake stamp it now.
 		stoppedAt time.Time
 	}{
 		{"stale is stopped before it is answered (RP-1)", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, nil, nil, []string{"stop w", "send s [tu_2 tu_3]"}, time.Time{}},

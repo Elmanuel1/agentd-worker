@@ -50,20 +50,32 @@ func TestFailedCallIsRetried(t *testing.T) {
 }
 
 // TestUntimedStopIsAnsweredByTheListedTime holds RP-1 when agentd answers a stop with no time: the
-// pass answers nothing and retries, and the next answers by the stop time agentd lists, never by
-// this clock.
+// pass answers nothing and retries, the next answers by the stop time agentd lists, and an item
+// it lists with no time is retried again; no cutoff is ever this clock's.
 func TestUntimedStopIsAnsweredByTheListedTime(t *testing.T) {
 	now := time.Now()
-	log := []Event{{Type: ToolUse, ID: "dead", At: now.Add(-time.Minute)}, {Type: ToolUse, ID: "live", At: now.Add(-10 * time.Second)}}
-	f := &fakeAgentd{items: []Item{{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}}, events: map[ids.SessionID][]Event{"s": log}, untimed: true}
-	r := newReaper(t, f)
-	r.passAt(t.Context(), now)
-	if want := []string{"stop w"}; !slices.Equal(f.calls, want) {
-		t.Fatalf("first pass %v, want %v", f.calls, want)
+	cases := []struct {
+		name   string
+		listed time.Time
+		want   []string
+	}{
+		{"the listed time", now.Add(-30 * time.Second), []string{"send s [dead]"}},
+		{"no listed time", time.Time{}, nil},
 	}
-	f.items, f.calls = []Item{{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-30 * time.Second)}}, nil
-	r.passAt(t.Context(), now.Add(time.Minute))
-	if want := []string{"send s [dead]"}; !slices.Equal(f.calls, want) {
-		t.Errorf("next pass %v, want %v", f.calls, want)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			log := []Event{{Type: ToolUse, ID: "dead", At: now.Add(-time.Minute)}, {Type: ToolUse, ID: "live", At: now.Add(-10 * time.Second)}}
+			f := &fakeAgentd{items: []Item{{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}}, events: map[ids.SessionID][]Event{"s": log}, untimed: true}
+			r := newReaper(t, f)
+			r.passAt(t.Context(), now)
+			if want := []string{"stop w"}; !slices.Equal(f.calls, want) {
+				t.Fatalf("first pass %v, want %v", f.calls, want)
+			}
+			f.items, f.calls = []Item{{Work: "w", Session: "s", State: StateStopped, StoppedAt: c.listed}}, nil
+			r.passAt(t.Context(), now.Add(time.Minute))
+			if !slices.Equal(f.calls, c.want) || r.retry["s"] != (c.want == nil) {
+				t.Errorf("next pass %v, retry %v; want %v", f.calls, r.retry["s"], c.want)
+			}
+		})
 	}
 }

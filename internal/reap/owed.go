@@ -5,7 +5,7 @@ import "time"
 // owed returns the tool calls a worker still owes a result, in order, by the rules of the SDK's
 // tool runner: a call with no result, allowed by its permission or by a later confirmation, not
 // cut off by a later interrupt of the whole session, and not of a terminated thread. A session
-// that ended owes nothing. With until set, a call made after it is not owed.
+// that ended owes nothing, nor a call made after until.
 func owed(events []Event, until time.Time) []string {
 	type call struct {
 		id, permission, thread string
@@ -37,7 +37,7 @@ func owed(events []Event, until time.Time) []string {
 	var ids []string
 	for _, c := range calls[cut:] {
 		allowed := c.permission == "" || c.permission == "allow" || (c.permission == "ask" && verdicts[c.id] == "allow")
-		later := !until.IsZero() && c.at.After(until)
+		later := c.at.After(until)
 		if answered[c.id] || terminated[c.thread] || !allowed || later {
 			continue
 		}

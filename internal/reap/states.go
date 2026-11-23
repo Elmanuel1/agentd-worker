@@ -2,7 +2,6 @@ package reap
 
 import (
 	"context"
-	"errors"
 	"fmt"
 )
 
@@ -12,14 +11,9 @@ type Stale struct {
 }
 
 // Stop stops the item, so the session's next tool call queues it again. Its calls are those made
-// by the stop agentd records: a replacement worker's come after the requeue that follows it. A
-// stop agentd answers with no time is a failure, so the next pass answers it as a stopped item
-// with the time agentd lists, never by this clock.
+// by the stop agentd records: a replacement worker's come after the requeue that follows it.
 func (s Stale) Stop(ctx context.Context, items Items) (Stopped, error) {
 	at, err := items.Stop(ctx, s.item.Work)
-	if err == nil && at.IsZero() {
-		err = errors.New("agentd recorded no stop time")
-	}
 	if err != nil {
 		return Stopped{}, fmt.Errorf("stopping item %s: %w", s.item.Session, err)
 	}
@@ -35,9 +29,13 @@ type Stopped struct {
 	reaped bool
 }
 
-// Answer posts an error result for each tool call the session still owes. Of a stopped item,
-// only calls made by its stop count: a later one is the session's next worker's.
+// Answer posts an error result for each tool call the session still owes. Only calls made by the
+// item's stop count: a later one is the session's next worker's. An item agentd records no stop
+// time for is a failure, retried each pass, as no cutoff by this clock is safe.
 func (s Stopped) Answer(ctx context.Context, events Events) (Answered, error) {
+	if s.item.StoppedAt.IsZero() {
+		return Answered{}, fmt.Errorf("answering %s: agentd recorded no stop time", s.item.Session)
+	}
 	log, err := events.List(ctx, s.item.Session)
 	if err != nil {
 		return Answered{}, fmt.Errorf("listing events of %s: %w", s.item.Session, err)

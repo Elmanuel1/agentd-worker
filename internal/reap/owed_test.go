@@ -1,6 +1,7 @@
 package reap
 
 import (
+	"cmp"
 	"slices"
 	"testing"
 	"time"
@@ -12,7 +13,7 @@ func TestOwed(t *testing.T) {
 	use := func(id, permission, thread string, m int) Event {
 		return Event{Type: ToolUse, ID: id, Permission: permission, Thread: thread, At: at(m)}
 	}
-	// until is the minute the item stopped, 0 for a stale item, whose stop is this pass's.
+	// until is the minute the item stopped, after every call when 0.
 	cases := []struct {
 		name   string
 		events []Event
@@ -33,11 +34,7 @@ func TestOwed(t *testing.T) {
 		{"a terminated session owes nothing", append(slices.Clone(owes), Event{Type: SessionTerminated}), 0, nil},
 	}
 	for _, c := range cases {
-		var until time.Time
-		if c.until > 0 {
-			until = at(c.until)
-		}
-		if got := owed(c.events, until); !slices.Equal(got, c.want) {
+		if got := owed(c.events, at(cmp.Or(c.until, 59))); !slices.Equal(got, c.want) {
 			t.Errorf("%s: owed %v, want %v", c.name, got, c.want)
 		}
 	}
