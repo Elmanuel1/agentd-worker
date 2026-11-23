@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"maps"
 	"slices"
 	"testing"
 )
@@ -29,10 +30,11 @@ func TestRoles(t *testing.T) {
 func TestCommands(t *testing.T) {
 	l := &Launcher{cfg: Config{Runtime: runc, SandboxImage: "sandbox", ToolImage: "tool"}}
 	want := map[role][]string{roleFetch: {"fetch"}, roleWorker: {"cma-sandbox-worker"}, roleSidecar: {"sidecar"}}
+	got := map[role][]string{}
 	for _, spec := range l.specs("sesn_1", "n1") {
-		r := role(spec.Config.Labels[labelRole])
-		if !slices.Equal(spec.Config.Cmd, want[r]) {
-			t.Errorf("%s runs %q, want %q", r, spec.Config.Cmd, want[r])
-		}
+		got[role(spec.Config.Labels[labelRole])] = spec.Config.Cmd
+	}
+	if !maps.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("containers run %q, want %q", got, want)
 	}
 }
