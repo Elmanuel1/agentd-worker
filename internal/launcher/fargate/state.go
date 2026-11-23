@@ -93,8 +93,8 @@ func addressOf(tasks []ecstypes.Task, err error) (netip.Addr, bool, error) {
 const stopWait = 3 * time.Minute
 
 // taskRetention is how long ECS keeps returning a task after it stops; it always returns one that
-// runs. So a known task it does not return stopped at least this long ago once its launch is this
-// old, and before that is not yet consistent, not gone, and Stop waits on it.
+// runs. So a known task it does not return has stopped at least this long ago once its launch is
+// this old, and before that is not yet consistent, not gone, and Stop waits on it.
 const taskRetention = time.Hour
 
 // Stop stops the session's tasks and returns once each has stopped, so no later task shares the

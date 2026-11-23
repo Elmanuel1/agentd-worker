@@ -26,27 +26,26 @@ func (c *Client) Work() Work { return Work{c: c} }
 
 // List returns one page of the environment's items.
 func (w Work) List(ctx context.Context, cursor string) ([]reap.Item, string, error) {
-	c := w.c
 	params := anthropic.BetaEnvironmentWorkListParams{Limit: param.NewOpt(int64(pageSize))}
 	if cursor != "" {
 		params.Page = param.NewOpt(cursor)
 	}
-	page, err := c.api.Beta.Environments.Work.List(ctx, string(c.env), params)
+	page, err := w.c.api.Beta.Environments.Work.List(ctx, string(w.c.env), params)
 	if err != nil {
 		return nil, "", wrap(err)
 	}
 	items := make([]reap.Item, 0, len(page.Data))
-	for _, w := range page.Data {
-		session, err := ids.ParseSessionID(w.Data.ID)
+	for _, item := range page.Data {
+		session, err := ids.ParseSessionID(item.Data.ID)
 		if err != nil {
 			continue
 		}
-		beat := parse(w.LatestHeartbeatAt)
+		beat := parse(item.LatestHeartbeatAt)
 		if beat.IsZero() {
-			beat = parse(w.AcknowledgedAt)
+			beat = parse(item.AcknowledgedAt)
 		}
 		items = append(items, reap.Item{
-			Work: ids.WorkID(w.ID), Session: session, State: string(w.State), Beat: beat, StoppedAt: parse(w.StoppedAt),
+			Work: ids.WorkID(item.ID), Session: session, State: string(item.State), Beat: beat, StoppedAt: parse(item.StoppedAt),
 		})
 	}
 	return items, page.NextPage, nil
