@@ -68,7 +68,8 @@ func (l *Launcher) specs(session ids.SessionID, nonce ids.Nonce) []client.Contai
 	for _, v := range fetch.Env(l.cfg.HandoffURL, l.cfg.HandoffCA, l.cfg.HandoffWait) {
 		fetchSpec.Config.Env = append(fetchSpec.Config.Env, v.Name+"="+v.Value)
 	}
-	worker := l.spec(session, roleWorker, &container.Config{Image: l.cfg.SandboxImage}, []mount.Mount{workspace, run}, []string{"ALL"})
+	// The image's own command is a shell; Anthropic's chart runs the worker as this.
+	worker := l.spec(session, roleWorker, &container.Config{Image: l.cfg.SandboxImage, Cmd: []string{"cma-sandbox-worker"}}, []mount.Mount{workspace, run}, []string{"ALL"})
 	sidecar := l.spec(session, roleSidecar, &container.Config{Image: l.cfg.ToolImage, Cmd: []string{"sidecar"}, User: root}, []mount.Mount{run}, nil)
 	return []client.ContainerCreateOptions{fetchSpec, worker, sidecar}
 }

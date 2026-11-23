@@ -59,7 +59,8 @@ func (l *Launcher) taskDefinition(session ids.SessionID, accessPoint string) *ec
 				LogConfiguration: l.logs(containerFetch),
 			},
 			{
-				Name: aws.String(containerWorker), Image: aws.String(l.cfg.SandboxImage), Essential: aws.Bool(true),
+				// The image's own command is a shell; Anthropic's chart runs the worker as this.
+				Name: aws.String(containerWorker), Image: aws.String(l.cfg.SandboxImage), Command: []string{"cma-sandbox-worker"}, Essential: aws.Bool(true),
 				// ECS stops containers in reverse of their dependencies, so the sidecar, started
 				// before the worker, stops after it and never stops the item under a live worker.
 				DependsOn: []types.ContainerDependency{

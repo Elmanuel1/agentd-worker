@@ -133,7 +133,7 @@ jobs:
         if: failure()
         run: |
           tail -200 agentd.log; tail -200 e2e/out/controller.log; tail -50 model.log
-          for c in $(docker ps -aq --filter label=agentd.session); do docker logs "$c" 2>&1 | tail -40; done
+          for f in e2e/out/container-*.log; do echo "== $f"; tail -40 "$f"; done
 
   e2e-kind:
     # Pending: the cloud e2e routes sandboxes through the iron-proxy extension, which another

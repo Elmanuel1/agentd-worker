@@ -12,8 +12,8 @@ import (
 	"github.com/Elmanuel1/agentd-worker/internal/reap"
 )
 
-// pageSize is the list routes' maximum page.
-const pageSize = 1000
+// pageSize is the Managed Agents list routes' largest page, as agentd and live cap it.
+const pageSize = 100
 
 // errorText is the content of the error result posted for an owed call.
 const errorText = "The worker running this tool call stopped before it finished."

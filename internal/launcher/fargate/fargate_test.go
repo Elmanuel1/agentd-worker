@@ -122,6 +122,7 @@ func TestTaskDefinition(t *testing.T) {
 			Name      string
 			Essential bool
 			Secrets   []any
+			Command   []string
 			DependsOn []struct{ ContainerName, Condition string }
 		} `json:"containerDefinitions"`
 	}
@@ -138,6 +139,9 @@ func TestTaskDefinition(t *testing.T) {
 		if c.Essential != (c.Name == containerWorker) {
 			t.Errorf("%s essential %v", c.Name, c.Essential)
 		}
+	}
+	if cmd := def.Containers[1].Command; !slices.Equal(cmd, []string{"cma-sandbox-worker"}) {
+		t.Errorf("worker command %q, want Anthropic's worker script, as the chart runs it", cmd)
 	}
 	// The worker starts once fetch succeeds and after the sidecar, so ECS stops the sidecar after it (SD-1).
 	want := []struct{ ContainerName, Condition string }{{"fetch", "SUCCESS"}, {"sidecar", "START"}}

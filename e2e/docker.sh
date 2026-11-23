@@ -25,6 +25,10 @@ added=1
 sudo iptables -I DOCKER-USER -i br-+ -d 168.63.129.16 -j REJECT
 added=2
 
+# Each sandbox container's output, kept past its removal for the failure log.
+docker events --filter type=container --filter event=start --filter label=agentd.session --format '{{.ID}}' |
+	while read -r id; do docker logs -f "$id" >"$out/container-$id.log" 2>&1 & done &
+
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -subj "/CN=agentd-e2e" \
 	-addext "subjectAltName=IP:$gateway" -keyout "$out/handoff.key" -out "$out/handoff.crt" 2>/dev/null
 (cd "$here/.." && go build -o "$out/agentd-worker" ./cmd/agentd-worker)
