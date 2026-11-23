@@ -3,6 +3,7 @@ package agentd
 import (
 	"context"
 	"errors"
+	"net/http"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go/v2"
@@ -18,8 +19,14 @@ const pageSize = 100
 // errorText is the content of the error result posted for an owed call.
 const errorText = "The worker running this tool call stopped before it finished."
 
+// Work is the environment's work items as the reaper reads and stops them, with the client's credential.
+type Work struct{ c *Client }
+
+func (c *Client) Work() Work { return Work{c: c} }
+
 // List returns one page of the environment's items.
-func (c *Client) List(ctx context.Context, cursor string) ([]reap.Item, string, error) {
+func (w Work) List(ctx context.Context, cursor string) ([]reap.Item, string, error) {
+	c := w.c
 	params := anthropic.BetaEnvironmentWorkListParams{Limit: param.NewOpt(int64(pageSize))}
 	if cursor != "" {
 		params.Page = param.NewOpt(cursor)
@@ -43,6 +50,20 @@ func (c *Client) List(ctx context.Context, cursor string) ([]reap.Item, string, 
 		})
 	}
 	return items, page.NextPage, nil
+}
+
+// Stop force-stops the item and returns the stop agentd records, in the clock that stamps the
+// session's events. agentd answers an item already stopped with its first stop; live may answer
+// 409, and then the item is read for it.
+func (w Work) Stop(ctx context.Context, work ids.WorkID) (time.Time, error) {
+	got, err := w.c.stop(ctx, work)
+	if apiErr, ok := errors.AsType[*anthropic.Error](err); ok && apiErr.StatusCode == http.StatusConflict {
+		got, err = w.c.api.Beta.Environments.Work.Get(ctx, string(work), anthropic.BetaEnvironmentWorkGetParams{EnvironmentID: string(w.c.env)})
+	}
+	if err != nil {
+		return time.Time{}, wrap(err)
+	}
+	return parse(got.StoppedAt), nil
 }
 
 // Events is the session event routes, with the client's credential.

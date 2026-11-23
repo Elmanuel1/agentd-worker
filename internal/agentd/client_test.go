@@ -164,7 +164,7 @@ func TestListAndSend(t *testing.T) {
 		"POST /v1/sessions/sesn_1/events": route(200, `{"data":[]}`),
 	}}
 	c := serve(t, f)
-	items, next, err := c.List(t.Context(), "p1")
+	items, next, err := c.Work().List(t.Context(), "p1")
 	if err != nil || next != "p2" || len(items) != 2 {
 		t.Fatalf("list %v %q %v", items, next, err)
 	}

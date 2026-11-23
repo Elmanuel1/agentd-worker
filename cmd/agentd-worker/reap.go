@@ -28,7 +28,7 @@ func runReap(ctx context.Context, log *slog.Logger) error {
 	}
 	defer shutdown(context.WithoutCancel(ctx))
 	client := agentd.New(s.BaseURL, s.EnvironmentID, s.Key.Reveal(), requestTimeout)
-	reaper, err := reap.New(s.ReapSettings.config(), client, client.Events(), meter, log)
+	reaper, err := reap.New(s.ReapSettings.config(), client.Work(), client.Events(), meter, log)
 	if err != nil {
 		return err
 	}

@@ -65,7 +65,9 @@ type Event struct {
 type Items interface {
 	// List returns one page; next is empty on the last.
 	List(ctx context.Context, cursor string) (items []Item, next string, err error)
-	Stop(ctx context.Context, work ids.WorkID) error
+	// Stop stops the item and returns when agentd records it stopped, in the clock that stamps
+	// the session's events; zero when agentd records no time.
+	Stop(ctx context.Context, work ids.WorkID) (stoppedAt time.Time, err error)
 }
 
 // Events is the sessions' event logs.

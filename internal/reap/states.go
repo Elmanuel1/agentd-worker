@@ -1,6 +1,7 @@
 package reap
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"time"
@@ -11,14 +12,16 @@ type Stale struct {
 	item Item
 }
 
-// Stop stops the item at now, so the session's next tool call queues it again. Its calls are
-// those made by now: a replacement worker's come after the requeue that follows this stop.
+// Stop stops the item, so the session's next tool call queues it again. Its calls are those made
+// by the stop agentd records: a replacement worker's come after the requeue that follows it. With
+// no time recorded, the pass's own, now, stands in.
 func (s Stale) Stop(ctx context.Context, items Items, now time.Time) (Stopped, error) {
-	if err := items.Stop(ctx, s.item.Work); err != nil {
+	at, err := items.Stop(ctx, s.item.Work)
+	if err != nil {
 		return Stopped{}, fmt.Errorf("stopping item %s: %w", s.item.Session, err)
 	}
 	stopped := s.item
-	stopped.StoppedAt = now
+	stopped.StoppedAt = cmp.Or(at, now)
 	return Stopped{item: stopped, reaped: true}, nil
 }
 

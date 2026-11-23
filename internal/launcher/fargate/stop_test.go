@@ -140,7 +140,7 @@ func TestStopsATaskNotYetListed(t *testing.T) {
 		{"a refused stop keeps the task for the retry", func(f *lagging) ECS { return refusing{unlisted{f}} }, true, 1, true, 0, 0},
 		{"a task ECS does not return yet is stopped once it does", func(f *lagging) ECS { return &hidden{unlisted{f}, 1} }, false, 0, false, 10 * time.Second, 0},
 		{"a task launched within ECS's retention is never taken for gone", func(f *lagging) ECS { return &hidden{unlisted{f}, -1} }, true, 1, true, stopWait, 0},
-		{"a task ECS dropped after its retention is gone at once", func(f *lagging) ECS { return &hidden{unlisted{f}, -1} }, false, 1, false, 0, 2 * taskRetention},
+		{"a task ECS dropped, stopped over its retention ago, is gone at once", func(f *lagging) ECS { return &hidden{unlisted{f}, -1} }, false, 0, false, 0, 2 * taskRetention},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -151,6 +151,10 @@ func TestStopsATaskNotYetListed(t *testing.T) {
 					t.Fatal(err)
 				}
 				l.tasks["sesn_1"] = launched{l.tasks["sesn_1"].arn, time.Now().Add(-c.age)}
+				// A task ECS dropped long after its launch had stopped: ECS returns every running one.
+				if c.age > 0 {
+					f.StopTask(t.Context(), &ecs.StopTaskInput{Task: aws.String(l.tasks["sesn_1"].arn)})
+				}
 				start := time.Now()
 				err := l.Stop(t.Context(), "sesn_1")
 				n, _ := f.running(t.Context(), "sesn_1")

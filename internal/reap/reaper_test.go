@@ -24,9 +24,11 @@ type fakeAgentd struct {
 	items   []Item
 	events  map[ids.SessionID][]Event
 	stopErr map[ids.WorkID]error
-	sendErr error
-	pages   int
-	calls   []string // "stop sesn" and "send sesn ids", in order
+	// stoppedAt is the stop agentd records for a stopped item, zero for none.
+	stoppedAt time.Time
+	sendErr   error
+	pages     int
+	calls     []string // "stop sesn" and "send sesn ids", in order
 }
 
 func (f *fakeAgentd) List(_ context.Context, cursor string) ([]Item, string, error) {
@@ -42,11 +44,11 @@ func (f *fakeAgentd) List(_ context.Context, cursor string) ([]Item, string, err
 	return f.items[start:end], next, nil
 }
 
-func (f *fakeAgentd) Stop(_ context.Context, s ids.WorkID) error {
+func (f *fakeAgentd) Stop(_ context.Context, s ids.WorkID) (time.Time, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "stop "+string(s))
-	return f.stopErr[s]
+	return f.stoppedAt, f.stopErr[s]
 }
 
 type events struct{ f *fakeAgentd }
@@ -90,18 +92,24 @@ func TestPass(t *testing.T) {
 		// log is the session's events, owes when nil.
 		log  []Event
 		want []string
+		// stoppedAt is the stop agentd records, in its own clock; zero for none.
+		stoppedAt time.Time
 	}{
-		{"stale is stopped before it is answered (RP-1)", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, nil, nil, []string{"stop w", "send s [tu_2 tu_3]"}},
-		{"stale starting item by its ack", Item{Work: "w", Session: "s", State: StateStarting, Beat: now.Add(-7 * time.Minute)}, nil, nil, []string{"stop w", "send s [tu_2 tu_3]"}},
-		{"beating item is left alone", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-time.Minute)}, nil, nil, nil},
-		{"unacked item is left to reclaim", Item{Work: "w", Session: "s", State: StateStarting}, nil, nil, nil},
-		{"recently stopped is answered (RP-2)", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-30 * time.Second)}, nil, nil, []string{"send s [tu_2 tu_3]"}},
-		{"stopped within an interval before the last pass, by a lagging clock, is answered", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-90 * time.Second)}, nil, nil, []string{"send s [tu_2 tu_3]"}},
-		{"stopped an interval before the last pass is left", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-2 * time.Minute)}, nil, nil, nil},
-		{"a stopping item whose worker died is stopped", Item{Work: "w", Session: "s", State: StateStopping, Beat: now.Add(-7 * time.Minute)}, nil, nil, []string{"stop w", "send s [tu_2 tu_3]"}},
-		{"a stale item owes only calls made by this pass's stop of it", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, nil,
-			[]Event{{Type: ToolUse, ID: "dead", At: now.Add(-time.Minute)}, {Type: ToolUse, ID: "live", At: now.Add(time.Second)}}, []string{"stop w", "send s [dead]"}},
-		{"a failed stop answers nothing", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, errors.New("503"), nil, []string{"stop w"}},
+		{"stale is stopped before it is answered (RP-1)", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, nil, nil, []string{"stop w", "send s [tu_2 tu_3]"}, time.Time{}},
+		{"stale starting item by its ack", Item{Work: "w", Session: "s", State: StateStarting, Beat: now.Add(-7 * time.Minute)}, nil, nil, []string{"stop w", "send s [tu_2 tu_3]"}, time.Time{}},
+		{"beating item is left alone", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-time.Minute)}, nil, nil, nil, time.Time{}},
+		{"unacked item is left to reclaim", Item{Work: "w", Session: "s", State: StateStarting}, nil, nil, nil, time.Time{}},
+		{"recently stopped is answered (RP-2)", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-30 * time.Second)}, nil, nil, []string{"send s [tu_2 tu_3]"}, time.Time{}},
+		{"stopped within an interval before the last pass, by a lagging clock, is answered", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-90 * time.Second)}, nil, nil, []string{"send s [tu_2 tu_3]"}, time.Time{}},
+		{"stopped an interval before the last pass is left", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-2 * time.Minute)}, nil, nil, nil, time.Time{}},
+		{"a stopping item whose worker died is stopped", Item{Work: "w", Session: "s", State: StateStopping, Beat: now.Add(-7 * time.Minute)}, nil, nil, []string{"stop w", "send s [tu_2 tu_3]"}, time.Time{}},
+		{"a stale item agentd records no stop for owes only calls made by this pass", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, nil,
+			[]Event{{Type: ToolUse, ID: "dead", At: now.Add(-time.Minute)}, {Type: ToolUse, ID: "live", At: now.Add(time.Second)}}, []string{"stop w", "send s [dead]"}, time.Time{}},
+		{"a failed stop answers nothing", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, errors.New("503"), nil, []string{"stop w"}, time.Time{}},
+		{"a stale item owes calls made by agentd's stop, though its clock lags this one", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, nil,
+			[]Event{{Type: ToolUse, ID: "dead", At: now.Add(-time.Minute)}, {Type: ToolUse, ID: "live", At: now.Add(-10 * time.Second)}}, []string{"stop w", "send s [dead]"}, now.Add(-30 * time.Second)},
+		{"a stale item owes calls made by agentd's stop, though its clock runs ahead", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, nil,
+			[]Event{{Type: ToolUse, ID: "dead", At: now.Add(2 * time.Second)}}, []string{"stop w", "send s [dead]"}, now.Add(5 * time.Second)},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -109,7 +117,7 @@ func TestPass(t *testing.T) {
 			if log == nil {
 				log = owes
 			}
-			f := &fakeAgentd{items: []Item{c.item}, events: map[ids.SessionID][]Event{"s": log}, stopErr: map[ids.WorkID]error{"w": c.stop}}
+			f := &fakeAgentd{items: []Item{c.item}, events: map[ids.SessionID][]Event{"s": log}, stopErr: map[ids.WorkID]error{"w": c.stop}, stoppedAt: c.stoppedAt}
 			r := newReaper(t, f)
 			r.lastPass = now.Add(-time.Minute)
 			r.passAt(t.Context(), now)

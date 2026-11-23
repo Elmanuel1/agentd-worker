@@ -83,7 +83,7 @@ func runScale(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	reaper, err := reap.New(s.ReapSettings.config(), client, client.Events(), meter, log)
+	reaper, err := reap.New(s.ReapSettings.config(), client.Work(), client.Events(), meter, log)
 	if err != nil {
 		return err
 	}

@@ -102,15 +102,19 @@ func (c *Client) Depth(ctx context.Context) (int64, error) {
 // Stop force-stops the item, as ant does on exit. A 409 means another stopped it first, as the SDK's
 // worker reads it, and so does a 401 to the item's own token, which ends with the item.
 func (c *Client) Stop(ctx context.Context, work ids.WorkID) error {
-	_, err := c.api.Beta.Environments.Work.Stop(ctx, string(work), anthropic.BetaEnvironmentWorkStopParams{
-		EnvironmentID:                 string(c.env),
-		BetaSelfHostedWorkStopRequest: anthropic.BetaSelfHostedWorkStopRequestParam{Force: param.NewOpt(true)},
-	})
+	_, err := c.stop(ctx, work)
 	apiErr, _ := errors.AsType[*anthropic.Error](err)
 	if apiErr != nil && (apiErr.StatusCode == http.StatusConflict || (c.itemToken && apiErr.StatusCode == http.StatusUnauthorized)) {
 		return nil
 	}
 	return wrap(err)
+}
+
+func (c *Client) stop(ctx context.Context, work ids.WorkID) (*anthropic.BetaSelfHostedWork, error) {
+	return c.api.Beta.Environments.Work.Stop(ctx, string(work), anthropic.BetaEnvironmentWorkStopParams{
+		EnvironmentID:                 string(c.env),
+		BetaSelfHostedWorkStopRequest: anthropic.BetaSelfHostedWorkStopRequestParam{Force: param.NewOpt(true)},
+	})
 }
 
 // State counts a session gone only on agentd's own 404 naming it, as Anthropic's dispatcher reads
