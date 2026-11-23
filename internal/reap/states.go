@@ -3,6 +3,7 @@ package reap
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // Stale is an active or starting item whose worker stopped beating.
@@ -10,12 +11,15 @@ type Stale struct {
 	item Item
 }
 
-// Stop stops the item, so the session's next tool call queues it again.
-func (s Stale) Stop(ctx context.Context, items Items) (Stopped, error) {
+// Stop stops the item at now, so the session's next tool call queues it again. Its calls are
+// those made by now: a replacement worker's come after the requeue that follows this stop.
+func (s Stale) Stop(ctx context.Context, items Items, now time.Time) (Stopped, error) {
 	if err := items.Stop(ctx, s.item.Work); err != nil {
 		return Stopped{}, fmt.Errorf("stopping item %s: %w", s.item.Session, err)
 	}
-	return Stopped{item: s.item, reaped: true}, nil
+	stopped := s.item
+	stopped.StoppedAt = now
+	return Stopped{item: stopped, reaped: true}, nil
 }
 
 // Stopped is an item no worker holds, whose owed calls may still be unanswered. reaped is true

@@ -40,14 +40,13 @@ func open(t *testing.T, ecsClient ECS, efsClient EFS, cfg Config) *Launcher {
 	return l
 }
 
-// TestNewRefusesAWaitFargateCannotKeep holds FG-5's limit: the handoff wait ends inside the start timeout.
+// TestNewRefusesAWaitFargateCannotKeep holds SC-1's limit on Fargate: the handoff wait ends inside
+// the start timeout.
 func TestNewRefusesAWaitFargateCannotKeep(t *testing.T) {
-	for _, wait := range []time.Duration{0, MaxHandoffWait + time.Second} {
-		over := cfg
-		over.HandoffWait, over.RootMount = wait, t.TempDir()
-		if _, err := New(newFake(), newFake(), over); err == nil {
-			t.Errorf("a handoff wait of %s was taken", wait)
-		}
+	over := cfg
+	over.HandoffWait, over.RootMount = MaxHandoffWait+time.Second, t.TempDir()
+	if _, err := New(newFake(), newFake(), over); err == nil {
+		t.Errorf("a handoff wait of %s was taken", over.HandoffWait)
 	}
 }
 

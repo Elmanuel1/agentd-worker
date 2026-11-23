@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -96,14 +95,18 @@ func TestSettings(t *testing.T) {
 	}
 }
 
-// TestFetchReadsWhatLaunchersSet holds that the fetch container reads the names its launchers
-// set; a struct tag cannot name a constant, so this ties them.
+// TestFetchReadsWhatLaunchersSet holds that the fetch container reads back, by name and format,
+// the environment its launchers set.
 func TestFetchReadsWhatLaunchersSet(t *testing.T) {
-	names := map[string]string{"URL": fetch.EnvURL, "Nonce": fetch.EnvNonce, "CA": fetch.EnvCA, "Wait": fetch.EnvWait}
-	for field, name := range names {
-		f, _ := reflect.TypeFor[FetchSettings]().FieldByName(field)
-		if got := f.Tag.Get("envconfig"); got != name {
-			t.Errorf("FetchSettings.%s reads %q, launchers set %q", field, got, name)
-		}
+	for _, v := range fetch.Env("https://ctl:8443", "PEM", 90*time.Second) {
+		t.Setenv(v.Name, v.Value)
+	}
+	t.Setenv(fetch.EnvNonce, "n1")
+	var s FetchSettings
+	if err := envconfig.Process("", &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.URL != "https://ctl:8443" || s.CA != "PEM" || s.Wait != 90*time.Second || s.Nonce != "n1" {
+		t.Errorf("fetch read %+v", s)
 	}
 }

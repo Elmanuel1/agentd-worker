@@ -1,6 +1,7 @@
 package agentd
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,11 +11,13 @@ import (
 	"time"
 
 	"github.com/Elmanuel1/agentd-worker/internal/dispatch"
+	"github.com/Elmanuel1/agentd-worker/internal/ids"
 	"github.com/Elmanuel1/agentd-worker/internal/reap"
 )
 
 // fake answers each "METHOD path" with its body and status, and records request bodies.
 type fake struct {
+	url     string
 	routes  map[string]answer
 	bodies  map[string][]string
 	query   map[string]string
@@ -38,6 +41,7 @@ func serve(t *testing.T, f *fake) *Client {
 		w.Write([]byte(route.body))
 	}))
 	t.Cleanup(srv.Close)
+	f.url = srv.URL
 	return New(srv.URL, "env_1", "key", 5*time.Second)
 }
 
@@ -107,6 +111,16 @@ func TestPoll(t *testing.T) {
 	}
 }
 
+// itemToken is a work item's own token, as a sidecar reads it from the item's secret.
+func itemToken(t *testing.T) ids.WorkToken {
+	t.Helper()
+	token, err := ids.NewSecret(base64.RawURLEncoding.EncodeToString([]byte(`{"sessions_token":"tok"}`))).WorkToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
 // TestStop holds SD-1's and RP-1's readings of a stop: forced, a 409 already stopped, and a 401
 // already stopped only to the item's own token; an error names agentd's answer and no credential.
 func TestStop(t *testing.T) {
@@ -126,7 +140,9 @@ func TestStop(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			f := &fake{routes: map[string]answer{"POST /v1/environments/env_1/work/work_1/stop": route(c.status, `{"type":"error","error":{"type":"invalid_request_error","message":"no"}}`)}}
 			client := serve(t, f)
-			client.itemToken = c.itemToken
+			if c.itemToken {
+				client = ForItem(f.url, "env_1", itemToken(t), 5*time.Second)
+			}
 			err := client.Stop(t.Context(), "work_1")
 			if (err != nil) != c.failed || (err != nil && strings.Contains(err.Error(), "key")) {
 				t.Errorf("stop error %v", err)

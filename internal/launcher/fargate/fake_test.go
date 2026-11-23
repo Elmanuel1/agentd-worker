@@ -36,7 +36,7 @@ func (f *fakeAWS) RunTask(_ context.Context, in *ecs.RunTaskInput, _ ...func(*ec
 	defer f.mu.Unlock()
 	f.n++
 	arn := fmt.Sprintf("arn:aws:ecs:r:1:task/c/%d", f.n)
-	f.tasks[arn] = &ecstypes.Task{TaskArn: aws.String(arn), TaskDefinitionArn: in.TaskDefinition, StartedBy: in.StartedBy, LastStatus: aws.String("RUNNING"), DesiredStatus: aws.String("RUNNING"),
+	f.tasks[arn] = &ecstypes.Task{TaskArn: aws.String(arn), TaskDefinitionArn: in.TaskDefinition, StartedBy: in.StartedBy, LastStatus: aws.String(lastRunning), DesiredStatus: aws.String(string(ecstypes.DesiredStatusRunning)),
 		Attachments: []ecstypes.Attachment{{Details: []ecstypes.KeyValuePair{{Name: aws.String("privateIPv4Address"), Value: aws.String(fmt.Sprintf("10.0.0.%d", f.n))}}}}}
 	f.runs = append(f.runs, in)
 	return &ecs.RunTaskOutput{Tasks: []ecstypes.Task{*f.tasks[arn]}}, nil
@@ -46,7 +46,7 @@ func (f *fakeAWS) StopTask(_ context.Context, in *ecs.StopTaskInput, _ ...func(*
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if t, ok := f.tasks[aws.ToString(in.Task)]; ok {
-		t.DesiredStatus, t.LastStatus = aws.String("STOPPED"), aws.String("STOPPED")
+		t.DesiredStatus, t.LastStatus = aws.String(string(ecstypes.DesiredStatusStopped)), aws.String(lastStopped)
 	}
 	return &ecs.StopTaskOutput{}, nil
 }
@@ -154,7 +154,7 @@ func (f *fakeAWS) running(_ context.Context, s ids.SessionID) (int, error) {
 	defer f.mu.Unlock()
 	n := 0
 	for _, t := range f.tasks {
-		if aws.ToString(t.StartedBy) == string(s) && aws.ToString(t.DesiredStatus) == "RUNNING" {
+		if aws.ToString(t.StartedBy) == string(s) && aws.ToString(t.DesiredStatus) == string(ecstypes.DesiredStatusRunning) {
 			n++
 		}
 	}

@@ -17,6 +17,12 @@ import (
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
 )
 
+// A task's and a container's lastStatus, which the SDK types only as a string.
+const (
+	lastRunning = "RUNNING"
+	lastStopped = "STOPPED"
+)
+
 // List returns each session with a task that should run or an access point tagged with it.
 func (l *Launcher) List(ctx context.Context) ([]dispatch.Sandbox, error) {
 	tasks, err := l.listTasks(ctx, "")
@@ -47,7 +53,7 @@ func (l *Launcher) List(ctx context.Context) ([]dispatch.Sandbox, error) {
 // starting runs without an address. A known task costs one DescribeTasks call and no ListTasks.
 func (l *Launcher) Address(ctx context.Context, session ids.SessionID) (netip.Addr, bool, error) {
 	l.mu.Lock()
-	arn := l.tasks[session]
+	arn := l.tasks[session].arn
 	l.mu.Unlock()
 	if arn == "" {
 		return addressOf(l.listTasks(ctx, session))
@@ -65,9 +71,9 @@ func addressOf(tasks []ecstypes.Task, err error) (netip.Addr, bool, error) {
 		}
 		running = true
 		fetchRuns := slices.ContainsFunc(t.Containers, func(c ecstypes.Container) bool {
-			return aws.ToString(c.Name) == containerFetch && aws.ToString(c.LastStatus) == string(ecstypes.DesiredStatusRunning)
+			return aws.ToString(c.Name) == containerFetch && aws.ToString(c.LastStatus) == lastRunning
 		})
-		if aws.ToString(t.LastStatus) != string(ecstypes.DesiredStatusRunning) && !fetchRuns {
+		if aws.ToString(t.LastStatus) != lastRunning && !fetchRuns {
 			continue
 		}
 		for _, a := range t.Attachments {
@@ -86,6 +92,11 @@ func addressOf(tasks []ecstypes.Task, err error) (netip.Addr, bool, error) {
 // after it, and room for ECS to deprovision.
 const stopWait = 3 * time.Minute
 
+// missingGrace is how long after its launch Stop waits on a task ECS does not return. ECS is
+// eventually consistent just after RunTask, and drops a task an hour after it stops; past this, a
+// task it does not return is gone.
+const missingGrace = 30 * time.Second
+
 // Stop stops the session's tasks and returns once each has stopped, so no later task shares the
 // workspace with one still shutting down. ListTasks is eventually consistent, so the task the last
 // Launch ran is read by its ARN as well, and a task told to stop before a controller restart is
@@ -95,49 +106,53 @@ func (l *Launcher) Stop(ctx context.Context, session ids.SessionID) error {
 	l.mu.Lock()
 	known := l.tasks[session]
 	l.mu.Unlock()
-	tasks, err := l.listTasks(ctx, session)
+	listed, err := l.listTasks(ctx, session)
 	if err != nil {
 		return err
 	}
-	var launchedARN []string
-	if known != "" {
-		launchedARN = []string{known}
-	}
-	launched, err := l.describeTasks(ctx, launchedARN)
-	if err != nil {
-		return err
-	}
-	tasks = append(tasks, launched...)
 	var arns []string
-	var errs []error
-	for _, t := range tasks {
-		arn := aws.ToString(t.TaskArn)
-		if slices.Contains(arns, arn) {
-			continue
-		}
-		arns = append(arns, arn)
-		if aws.ToString(t.DesiredStatus) == string(ecstypes.DesiredStatusRunning) {
-			_, err := l.ecs.StopTask(ctx, &ecs.StopTaskInput{Cluster: aws.String(l.cfg.Cluster), Task: t.TaskArn, Reason: aws.String("agentd-worker stopped the sandbox")})
-			errs = append(errs, err)
-		}
+	if known.arn != "" {
+		arns = append(arns, known.arn)
 	}
-	if err := errors.Join(errs...); err != nil {
-		return err
+	for _, t := range listed {
+		if arn := aws.ToString(t.TaskArn); !slices.Contains(arns, arn) {
+			arns = append(arns, arn)
+		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, stopWait)
 	defer cancel()
 	// startedBy must be ListTasks' only filter, so tasks told to stop are found by their family.
 	stopping := &ecs.ListTasksInput{Cluster: aws.String(l.cfg.Cluster), Family: aws.String(family(session)), DesiredStatus: ecstypes.DesiredStatusStopped}
+	asked := map[string]bool{}
 	for {
-		listed, err := l.tasksOf(ctx, stopping)
+		tasks, err := l.describeTasks(ctx, arns)
 		if err != nil {
 			return err
 		}
-		stopped, err := l.describeTasks(ctx, arns)
+		// A task can first appear in any read, so each stops what still runs, once, and reads
+		// again at once what the stop changed.
+		var errs []error
+		for _, t := range tasks {
+			if aws.ToString(t.DesiredStatus) != string(ecstypes.DesiredStatusRunning) || asked[aws.ToString(t.TaskArn)] {
+				continue
+			}
+			asked[aws.ToString(t.TaskArn)] = true
+			_, err := l.ecs.StopTask(ctx, &ecs.StopTaskInput{Cluster: aws.String(l.cfg.Cluster), Task: t.TaskArn, Reason: aws.String("agentd-worker stopped the sandbox")})
+			errs = append(errs, err)
+		}
+		if err := errors.Join(errs...); err != nil {
+			return err
+		}
+		if len(errs) > 0 {
+			continue
+		}
+		told, err := l.tasksOf(ctx, stopping)
 		if err != nil {
 			return err
 		}
-		if !slices.ContainsFunc(append(listed, stopped...), func(t ecstypes.Task) bool { return aws.ToString(t.LastStatus) != string(ecstypes.DesiredStatusStopped) }) {
+		missing := known.arn != "" && time.Since(known.at) < missingGrace &&
+			!slices.ContainsFunc(tasks, func(t ecstypes.Task) bool { return aws.ToString(t.TaskArn) == known.arn })
+		if !missing && !slices.ContainsFunc(append(tasks, told...), func(t ecstypes.Task) bool { return aws.ToString(t.LastStatus) != lastStopped }) {
 			break
 		}
 		select {

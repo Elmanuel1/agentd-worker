@@ -112,6 +112,18 @@ func TestPass(t *testing.T) {
 	}
 }
 
+// TestStaleOwesOnlyCallsBeforeItsStop holds RP-1 with a replacement worker already running: a call
+// made after this pass's stop is the replacement's, and still live.
+func TestStaleOwesOnlyCallsBeforeItsStop(t *testing.T) {
+	now := time.Now()
+	log := []Event{{Type: ToolUse, ID: "dead", At: now.Add(-time.Minute)}, {Type: ToolUse, ID: "live", At: now.Add(time.Second)}}
+	f := &fakeAgentd{items: []Item{{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}}, events: map[ids.SessionID][]Event{"s": log}}
+	newReaper(t, f).passAt(t.Context(), now)
+	if want := []string{"stop w", "send s [dead]"}; !slices.Equal(f.calls, want) {
+		t.Errorf("calls %v, want %v", f.calls, want)
+	}
+}
+
 // TestRunReadsEveryPage holds RP-3: a pass every interval, each over every page of 250 items.
 func TestRunReadsEveryPage(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {

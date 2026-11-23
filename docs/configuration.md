@@ -3,6 +3,10 @@
 Every setting is an environment variable. Secrets are environment variables too; how the deployment
 fills them (a Kubernetes Secret, an ECS task definition's `secrets`, a vault) is the deployment's concern.
 
+They are read with `kelseyhightower/envconfig`. A variable set to an empty value counts as set: it
+replaces the default and satisfies a required setting. A comma-separated list is taken as written,
+so leave no spaces around its commas. Start-up names the first setting it cannot read.
+
 ## `agentd-worker scale` (the controller)
 
 | Variable | Default | Meaning |

@@ -75,7 +75,13 @@ type Launcher struct {
 	mu   sync.Mutex
 	// tasks holds the task each Launch ran, so Address reads it with one DescribeTasks call;
 	// ECS allows 20 such reads a second, and a ListTasks per handoff would spend two.
-	tasks map[ids.SessionID]string
+	tasks map[ids.SessionID]launched
+}
+
+// launched is the task a Launch ran, and when.
+type launched struct {
+	arn string
+	at  time.Time
 }
 
 // MaxHandoffWait keeps the handoff wait inside the start timeout a Fargate container waits for its
@@ -84,14 +90,14 @@ const MaxHandoffWait = startTimeout - 10*time.Second
 
 // New refuses a handoff wait Fargate cannot keep, and opens the file system's root.
 func New(ecsClient ECS, efsClient EFS, cfg Config) (*Launcher, error) {
-	if cfg.HandoffWait <= 0 || cfg.HandoffWait > MaxHandoffWait {
-		return nil, fmt.Errorf("the handoff wait is %s; on Fargate it must be above 0 and at most %s", cfg.HandoffWait, MaxHandoffWait)
+	if cfg.HandoffWait > MaxHandoffWait {
+		return nil, fmt.Errorf("the handoff wait is %s; on Fargate it must be at most %s", cfg.HandoffWait, MaxHandoffWait)
 	}
 	root, err := os.OpenRoot(cfg.RootMount)
 	if err != nil {
 		return nil, fmt.Errorf("opening the file system's root: %w", err)
 	}
-	return &Launcher{ecs: ecsClient, efs: efsClient, root: root, cfg: cfg, tasks: map[ids.SessionID]string{}}, nil
+	return &Launcher{ecs: ecsClient, efs: efsClient, root: root, cfg: cfg, tasks: map[ids.SessionID]launched{}}, nil
 }
 
 func (l *Launcher) Close() { l.root.Close() }
@@ -137,7 +143,7 @@ func (l *Launcher) Launch(ctx context.Context, session ids.SessionID, nonce ids.
 		return fmt.Errorf("running the task: %v", out.Failures)
 	}
 	l.mu.Lock()
-	l.tasks[session] = aws.ToString(out.Tasks[0].TaskArn)
+	l.tasks[session] = launched{arn: aws.ToString(out.Tasks[0].TaskArn), at: time.Now()}
 	l.mu.Unlock()
 	return nil
 }

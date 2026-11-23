@@ -95,7 +95,7 @@ func (r *Reaper) reap(ctx context.Context, now time.Time, it Item) {
 	var stopped Stopped
 	switch {
 	case it.StaleAt(now, r.cfg.StaleAfter):
-		s, err := Stale{item: it}.Stop(ctx, r.items)
+		s, err := Stale{item: it}.Stop(ctx, r.items, now)
 		if err != nil {
 			r.fail(it, err)
 			return

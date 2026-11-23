@@ -15,6 +15,7 @@ import (
 	"github.com/Elmanuel1/agentd-worker/internal/agentd"
 	"github.com/Elmanuel1/agentd-worker/internal/dispatch"
 	"github.com/Elmanuel1/agentd-worker/internal/dispatch/handoff"
+	"github.com/Elmanuel1/agentd-worker/internal/ids"
 	"github.com/Elmanuel1/agentd-worker/internal/reap"
 	"github.com/Elmanuel1/agentd-worker/internal/telemetry"
 )
@@ -26,19 +27,19 @@ const requestTimeout = 30 * time.Second
 type ScaleSettings struct {
 	AgentdSettings
 	ReapSettings
-	Launcher        string  `envconfig:"AGENTD_WORKER_LAUNCHER" default:"docker"`
-	HandoffWait     seconds `envconfig:"AGENTD_HANDOFF_WAIT_SECONDS"`
-	MaxSandboxes    int     `envconfig:"AGENTD_MAX_SANDBOXES" default:"100"`
-	ReleaseInterval seconds `envconfig:"AGENTD_RELEASE_INTERVAL_SECONDS" default:"600"`
-	RetentionDays   uint    `envconfig:"AGENTD_RETENTION_DAYS" default:"0"`
-	HandoffAddr     string  `envconfig:"AGENTD_HANDOFF_ADDR" default:":8443"`
-	HandoffCert     string  `envconfig:"AGENTD_HANDOFF_CERT" required:"true"`
-	HandoffKey      string  `envconfig:"AGENTD_HANDOFF_KEY" required:"true"`
-	HandoffURL      string  `envconfig:"AGENTD_HANDOFF_URL" required:"true"`
-	HandoffCA       string  `envconfig:"AGENTD_HANDOFF_CA" required:"true"`
-	SandboxBaseURL  string  `envconfig:"AGENTD_SANDBOX_BASE_URL"`
-	SandboxImage    string  `envconfig:"AGENTD_SANDBOX_IMAGE" required:"true"`
-	ToolImage       string  `envconfig:"AGENTD_TOOL_IMAGE" required:"true"`
+	Launcher        string     `envconfig:"AGENTD_WORKER_LAUNCHER" default:"docker"`
+	HandoffWait     seconds    `envconfig:"AGENTD_HANDOFF_WAIT_SECONDS"`
+	MaxSandboxes    int        `envconfig:"AGENTD_MAX_SANDBOXES" default:"100"`
+	ReleaseInterval seconds    `envconfig:"AGENTD_RELEASE_INTERVAL_SECONDS" default:"600"`
+	RetentionDays   uint       `envconfig:"AGENTD_RETENTION_DAYS" default:"0"`
+	HandoffAddr     string     `envconfig:"AGENTD_HANDOFF_ADDR" default:":8443"`
+	HandoffCert     string     `envconfig:"AGENTD_HANDOFF_CERT" required:"true"`
+	HandoffKey      ids.Secret `envconfig:"AGENTD_HANDOFF_KEY" required:"true"`
+	HandoffURL      string     `envconfig:"AGENTD_HANDOFF_URL" required:"true"`
+	HandoffCA       string     `envconfig:"AGENTD_HANDOFF_CA" required:"true"`
+	SandboxBaseURL  string     `envconfig:"AGENTD_SANDBOX_BASE_URL"`
+	SandboxImage    string     `envconfig:"AGENTD_SANDBOX_IMAGE" required:"true"`
+	ToolImage       string     `envconfig:"AGENTD_TOOL_IMAGE" required:"true"`
 }
 
 func runScale(ctx context.Context, log *slog.Logger) error {
@@ -50,7 +51,7 @@ func runScale(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	cert, err := tls.X509KeyPair([]byte(s.HandoffCert), []byte(s.HandoffKey))
+	cert, err := tls.X509KeyPair([]byte(s.HandoffCert), []byte(s.HandoffKey.Reveal()))
 	if err != nil {
 		return fmt.Errorf("AGENTD_HANDOFF_CERT and AGENTD_HANDOFF_KEY: %w", err)
 	}

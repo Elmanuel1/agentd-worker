@@ -23,9 +23,11 @@ Fargate task for it. `deploy/fargate` is the Terraform for one environment.
 
 **Known gap: DNS.** A task reaches the VPC's DNS server, which security groups cannot filter, and
 a lookup can carry data in the name it asks for. Closing it takes Route 53 Resolver DNS Firewall on
-the VPC, allowing only agentd's, the proxy's and the controller's names and the endpoints' service
-names: `ecr.api`, `ecr.dkr`, `s3`, `logs`, `secretsmanager`, `ecs` and `elasticfilesystem` under
-`<region>.amazonaws.com`, and ECR's layer bucket.
+the VPC, allowing only agentd's, the proxy's and the controller's names and the AWS names the
+tasks resolve: `api.ecr.<region>.amazonaws.com`, `<account>.dkr.ecr.<region>.amazonaws.com`,
+`prod-<region>-starport-layer-bucket.s3.<region>.amazonaws.com` (ECR's layers),
+`logs.<region>.amazonaws.com`, `secretsmanager.<region>.amazonaws.com`, `ecs.<region>.amazonaws.com`,
+`elasticfilesystem.<region>.amazonaws.com` and the file system's `<fs-id>.efs.<region>.amazonaws.com`.
 
 ## Quotas
 

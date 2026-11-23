@@ -59,7 +59,7 @@ func TestAddressOfAStoppedTask(t *testing.T) {
 	}
 	f.mu.Lock()
 	for _, task := range f.tasks {
-		task.DesiredStatus, task.LastStatus = aws.String(string(ecstypes.DesiredStatusStopped)), aws.String(string(ecstypes.DesiredStatusStopped))
+		task.DesiredStatus, task.LastStatus = aws.String(string(ecstypes.DesiredStatusStopped)), aws.String(lastStopped)
 	}
 	f.mu.Unlock()
 	if _, running, err := l.Address(t.Context(), "sesn_1"); running || err != nil {
