@@ -2,11 +2,14 @@ package main
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
+
+	"github.com/Elmanuel1/agentd-worker/internal/fetch"
 )
 
 // unset clears keys for the test, whatever the shell running it holds.
@@ -90,5 +93,17 @@ func TestSettings(t *testing.T) {
 	}
 	if s.Key.Reveal() != "sk-live" || strings.Contains(s.Key.String(), "sk-live") {
 		t.Errorf("key %q reveals %q", s.Key, s.Key.Reveal())
+	}
+}
+
+// TestFetchReadsWhatLaunchersSet holds that the fetch container reads the names its launchers
+// set; a struct tag cannot name a constant, so this ties them.
+func TestFetchReadsWhatLaunchersSet(t *testing.T) {
+	names := map[string]string{"URL": fetch.EnvURL, "Nonce": fetch.EnvNonce, "CA": fetch.EnvCA, "Wait": fetch.EnvWait}
+	for field, name := range names {
+		f, _ := reflect.TypeFor[FetchSettings]().FieldByName(field)
+		if got := f.Tag.Get("envconfig"); got != name {
+			t.Errorf("FetchSettings.%s reads %q, launchers set %q", field, got, name)
+		}
 	}
 }

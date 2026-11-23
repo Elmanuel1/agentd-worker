@@ -21,22 +21,14 @@ import (
 // blockMs is how long one poll blocks server-side.
 const blockMs = 999
 
-// APIError is agentd's answer to a failed call.
-type APIError struct {
-	status int
-	err    error
-}
-
-func (e *APIError) Error() string   { return e.err.Error() }
-func (e *APIError) Unwrap() error   { return e.err }
-func (e *APIError) HTTPStatus() int { return e.status }
-
 // Client calls one environment's routes with one credential: an environment key, the runtime
 // key, or a session's work token.
 type Client struct {
 	api    anthropic.Client
 	env    ids.EnvironmentID
 	worker string
+	// itemToken is set when the credential is the item's own work token, which ends with the item.
+	itemToken bool
 }
 
 // New builds a client that only ever dials baseURL.
@@ -51,6 +43,13 @@ func New(baseURL string, env ids.EnvironmentID, credential string, timeout time.
 		),
 		env: env,
 	}
+}
+
+// ForItem builds a client on a work item's own token, as its sidecar holds.
+func ForItem(baseURL string, env ids.EnvironmentID, token ids.WorkToken, timeout time.Duration) *Client {
+	c := New(baseURL, env, token.Reveal(), timeout)
+	c.itemToken = true
+	return c
 }
 
 // WithWorker names the poller in each poll, so the queue's stats count it in workers_polling.
@@ -100,12 +99,17 @@ func (c *Client) Depth(ctx context.Context) (int64, error) {
 	return stats.Depth, nil
 }
 
-// Stop force-stops the item, as ant does on exit.
+// Stop force-stops the item, as ant does on exit. A 409 means another stopped it first, as the SDK's
+// worker reads it, and so does a 401 to the item's own token, which ends with the item.
 func (c *Client) Stop(ctx context.Context, work ids.WorkID) error {
 	_, err := c.api.Beta.Environments.Work.Stop(ctx, string(work), anthropic.BetaEnvironmentWorkStopParams{
 		EnvironmentID:                 string(c.env),
 		BetaSelfHostedWorkStopRequest: anthropic.BetaSelfHostedWorkStopRequestParam{Force: param.NewOpt(true)},
 	})
+	apiErr, _ := errors.AsType[*anthropic.Error](err)
+	if apiErr != nil && (apiErr.StatusCode == http.StatusConflict || (c.itemToken && apiErr.StatusCode == http.StatusUnauthorized)) {
+		return nil
+	}
 	return wrap(err)
 }
 
@@ -139,8 +143,9 @@ func wrap(err error) error {
 	if err == nil {
 		return nil
 	}
+	// The SDK's own message quotes the request; this one names only the answer.
 	if apiErr, ok := errors.AsType[*anthropic.Error](err); ok {
-		return &APIError{status: apiErr.StatusCode, err: fmt.Errorf("agentd answered %d: %s", apiErr.StatusCode, apiErr.Type())}
+		return fmt.Errorf("agentd answered %d: %s", apiErr.StatusCode, apiErr.Type())
 	}
 	return err
 }

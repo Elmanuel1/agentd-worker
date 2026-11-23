@@ -54,14 +54,15 @@ func (c *Client) Events() Events { return Events{api: c.api} }
 
 // List returns the session's tool-call events, oldest first.
 func (e Events) List(ctx context.Context, session ids.SessionID) ([]reap.Event, error) {
+	var types []anthropic.BetaManagedAgentsSessionEventType
+	for _, t := range reap.EventTypes() {
+		types = append(types, anthropic.BetaManagedAgentsSessionEventType(t))
+	}
 	pager := e.api.Beta.Sessions.Events.ListAutoPaging(ctx, string(session), anthropic.BetaSessionEventListParams{
 		Limit: param.NewOpt(int64(pageSize)),
 		Order: anthropic.BetaSessionEventListParamsOrderAsc,
 		// Only the events the reaper reads, so a long session's history costs few pages.
-		Types: []anthropic.BetaManagedAgentsSessionEventType{
-			reap.ToolUse, reap.ToolResult, reap.Confirmation, reap.Interrupt,
-			reap.ThreadTerminated, reap.SessionTerminated, reap.SessionDeleted,
-		},
+		Types: types,
 	})
 	var out []reap.Event
 	for pager.Next() {

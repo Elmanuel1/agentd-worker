@@ -13,11 +13,25 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Elmanuel1/agentd-worker/internal/dispatch/handoff"
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
 )
 
-// NonceHeader carries the nonce, under the name Anthropic's dispatcher reads.
-const NonceHeader = "X-CMA-Assignment-Nonce"
+// The fetch container's environment, which its launcher sets.
+const (
+	EnvURL   = "AGENTD_HANDOFF_URL"
+	EnvNonce = "AGENTD_HANDOFF_NONCE"
+	EnvCA    = "AGENTD_HANDOFF_CA"
+	EnvWait  = "AGENTD_HANDOFF_WAIT"
+)
+
+// Var is one environment variable.
+type Var struct{ Name, Value string }
+
+// Env is every variable a launcher gives the fetch container but EnvNonce, which each launch adds.
+func Env(url, ca string, wait time.Duration) []Var {
+	return []Var{{EnvURL, url}, {EnvCA, ca}, {EnvWait, wait.String()}}
+}
 
 var (
 	// ErrRefused means the controller answered 403: this sandbox will never get the item.
@@ -44,16 +58,11 @@ type Config struct {
 	Wait     time.Duration
 }
 
-type item struct {
-	SessionID     string `json:"session_id"`
-	WorkID        string `json:"work_id"`
-	EnvironmentID string `json:"environment_id"`
-	BaseURL       string `json:"base_url"`
-	Secret        string `json:"secret"`
-}
-
 // Run asks for the item every cfg.Every until it gets it, then writes it.
 func Run(ctx context.Context, client Doer, cfg Config) error {
+	if cfg.Every <= 0 || cfg.Wait <= 0 {
+		return errors.New("fetch's retry interval and handoff wait must be positive")
+	}
 	deadline := time.Now().Add(cfg.Wait)
 	for {
 		it, err := get(ctx, client, cfg)
@@ -76,30 +85,30 @@ func Run(ctx context.Context, client Doer, cfg Config) error {
 	}
 }
 
-func get(ctx context.Context, client Doer, cfg Config) (item, error) {
+func get(ctx context.Context, client Doer, cfg Config) (handoff.Item, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.URL+"/work-item", nil)
 	if err != nil {
-		return item{}, err
+		return handoff.Item{}, err
 	}
-	req.Header.Set(NonceHeader, string(cfg.Nonce))
+	req.Header.Set(handoff.NonceHeader, string(cfg.Nonce))
 	resp, err := client.Do(req)
 	if err != nil {
-		return item{}, err
+		return handoff.Item{}, err
 	}
 	defer resp.Body.Close()
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusForbidden:
-		return item{}, ErrRefused
+		return handoff.Item{}, ErrRefused
 	default:
-		return item{}, fmt.Errorf("controller answered %d", resp.StatusCode)
+		return handoff.Item{}, fmt.Errorf("controller answered %d", resp.StatusCode)
 	}
-	var it item
+	var it handoff.Item
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&it); err != nil {
-		return item{}, fmt.Errorf("decoding work item: %w", err)
+		return handoff.Item{}, fmt.Errorf("decoding work item: %w", err)
 	}
-	if _, err := ids.ParseSessionID(it.SessionID); err != nil || it.WorkID == "" || it.EnvironmentID == "" || it.BaseURL == "" || it.Secret == "" {
-		return item{}, errors.Join(ErrRefused, errors.New("work item is missing a field"))
+	if _, err := ids.ParseSessionID(string(it.SessionID)); err != nil || it.WorkID == "" || it.EnvironmentID == "" || it.BaseURL == "" || it.Secret == "" {
+		return handoff.Item{}, errors.Join(ErrRefused, errors.New("work item is missing a field"))
 	}
 	return it, nil
 }
@@ -108,7 +117,7 @@ func get(ctx context.Context, client Doer, cfg Config) (item, error) {
 // presence tells the worker the rest is there. The work-item directory stays fetch's, so the
 // worker can read it and not change it, as Anthropic's script checks; the shared directory is
 // the worker's group's, so the script can ask for its run to be recorded.
-func write(cfg Config, it item) error {
+func write(cfg Config, it handoff.Item) error {
 	dir := filepath.Join(cfg.Dir, "work-item")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -121,7 +130,7 @@ func write(cfg Config, it item) error {
 		return err
 	}
 	fields := [][2]string{
-		{"session_id", it.SessionID}, {"work_id", it.WorkID}, {"environment_id", it.EnvironmentID},
+		{"session_id", string(it.SessionID)}, {"work_id", string(it.WorkID)}, {"environment_id", string(it.EnvironmentID)},
 		{"base_url", it.BaseURL}, {"secret", it.Secret},
 	}
 	for _, f := range fields {

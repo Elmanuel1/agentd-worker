@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,12 +26,6 @@ type Items interface {
 
 // Connect builds Items for the work item's agentd and token.
 type Connect func(baseURL string, env ids.EnvironmentID, token ids.WorkToken) Items
-
-// statusError is an agentd answer that carries its HTTP status.
-type statusError interface {
-	error
-	HTTPStatus() int
-}
 
 // Config holds the sidecar's settings.
 type Config struct {
@@ -88,11 +81,7 @@ func stop(ctx context.Context, cfg Config, connect Connect) error {
 	ctx, cancel := context.WithTimeout(ctx, stopTimeout)
 	defer cancel()
 	items := connect(read(dir, "base_url"), ids.EnvironmentID(read(dir, "environment_id")), token)
-	err = items.Stop(ctx, work)
-	if se, ok := errors.AsType[statusError](err); ok && (se.HTTPStatus() == http.StatusUnauthorized || se.HTTPStatus() == http.StatusConflict) {
-		return nil
-	}
-	if err != nil {
+	if err := items.Stop(ctx, work); err != nil {
 		return fmt.Errorf("stopping item %s: %w", work, err)
 	}
 	return nil

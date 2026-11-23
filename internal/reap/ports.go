@@ -28,6 +28,11 @@ const (
 	SessionDeleted    = "session.deleted"
 )
 
+// EventTypes are the event types owed reads, all a session's log needs to give it.
+func EventTypes() []string {
+	return []string{ToolUse, ToolResult, Confirmation, Interrupt, ThreadTerminated, SessionTerminated, SessionDeleted}
+}
+
 // Item is one work item of the environment.
 type Item struct {
 	Work    ids.WorkID

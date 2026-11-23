@@ -11,6 +11,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/Elmanuel1/agentd-worker/internal/dispatch/handoff"
 )
 
 const body = `{"session_id":"sesn_1","work_id":"sesn_1","environment_id":"env_1","base_url":"https://agentd.test","secret":"s3cret"}`
@@ -23,7 +25,7 @@ type script struct {
 }
 
 func (s *script) Do(r *http.Request) (*http.Response, error) {
-	s.nonce = r.Header.Get(NonceHeader)
+	s.nonce = r.Header.Get(handoff.NonceHeader)
 	code := s.codes[min(s.calls, len(s.codes)-1)]
 	s.calls++
 	if code == 0 {
@@ -65,6 +67,16 @@ func TestRun(t *testing.T) {
 				checkFiles(t, dir)
 			})
 		})
+	}
+}
+
+// TestRunNeedsPositiveWaits holds that fetch refuses a config it would spin or give up at once on.
+func TestRunNeedsPositiveWaits(t *testing.T) {
+	for _, cfg := range []Config{{Every: 0, Wait: time.Second}, {Every: time.Second, Wait: 0}} {
+		s := &script{codes: []int{200}}
+		if err := Run(t.Context(), s, cfg); err == nil || s.nonce != "" {
+			t.Errorf("every %s, wait %s: %v after a request, want a refusal before one", cfg.Every, cfg.Wait, err)
+		}
 	}
 }
 

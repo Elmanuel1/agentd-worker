@@ -2,30 +2,17 @@ package reap
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
 )
-
-// statusError is an agentd answer that carries its HTTP status.
-type statusError interface {
-	error
-	HTTPStatus() int
-}
 
 // Stale is an active or starting item whose worker stopped beating.
 type Stale struct {
 	item Item
 }
 
-// Stop stops the item, so the session's next tool call queues it again. A 409 means another
-// stopped it first, as the SDK's worker reads it.
+// Stop stops the item, so the session's next tool call queues it again.
 func (s Stale) Stop(ctx context.Context, items Items) (Stopped, error) {
-	err := items.Stop(ctx, s.item.Work)
-	if se, ok := errors.AsType[statusError](err); ok && se.HTTPStatus() == http.StatusConflict {
-		err = nil
-	}
-	if err != nil {
+	if err := items.Stop(ctx, s.item.Work); err != nil {
 		return Stopped{}, fmt.Errorf("stopping item %s: %w", s.item.Session, err)
 	}
 	return Stopped{item: s.item, reaped: true}, nil

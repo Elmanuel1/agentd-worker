@@ -3,6 +3,7 @@ package sidecar
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,18 +13,13 @@ import (
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
 )
 
-type apiError int
-
-func (e apiError) Error() string   { return "agentd error" }
-func (e apiError) HTTPStatus() int { return int(e) }
-
 type items struct {
 	err     error
 	stopped []ids.WorkID
 	token   string
 }
 
-// TestStop holds SD-1: the item is stopped when the sandbox stops, 401 and 409 counting as stopped.
+// TestStop holds SD-1: the item is stopped when the sandbox stops, and a failed stop is an error.
 func TestStop(t *testing.T) {
 	cases := []struct {
 		name string
@@ -31,9 +27,7 @@ func TestStop(t *testing.T) {
 		want bool
 	}{
 		{"stopped", nil, true},
-		{"401 is already stopped", apiError(401), true},
-		{"409 is already stopped", apiError(409), true},
-		{"500 is an error", apiError(500), false},
+		{"a failed stop is an error", errors.New("agentd answered 500"), false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

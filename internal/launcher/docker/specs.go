@@ -8,6 +8,7 @@ import (
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 
+	"github.com/Elmanuel1/agentd-worker/internal/fetch"
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
 )
 
@@ -36,20 +37,18 @@ func labels(s ids.SessionID, role string) map[string]string {
 func (l *Launcher) specs(session ids.SessionID, nonce ids.Nonce) []client.ContainerCreateOptions {
 	run := mount.Mount{Type: mount.TypeVolume, Source: runVolume(session), Target: "/run/cma"}
 	workspace := mount.Mount{Type: mount.TypeVolume, Source: workspaceVolume(session), Target: "/workspace"}
-	fetch := l.spec(session, roleFetch, &container.Config{
+	fetchSpec := l.spec(session, roleFetch, &container.Config{
 		Image: l.cfg.ToolImage,
 		Cmd:   []string{"fetch"},
 		User:  root,
-		Env: []string{
-			"AGENTD_HANDOFF_URL=" + l.cfg.HandoffURL,
-			"AGENTD_HANDOFF_NONCE=" + string(nonce),
-			"AGENTD_HANDOFF_CA=" + l.cfg.HandoffCA,
-			"AGENTD_HANDOFF_WAIT=" + l.cfg.HandoffWait.String(),
-		},
+		Env:   []string{fetch.EnvNonce + "=" + string(nonce)},
 	}, []mount.Mount{run}, nil)
+	for _, v := range fetch.Env(l.cfg.HandoffURL, l.cfg.HandoffCA, l.cfg.HandoffWait) {
+		fetchSpec.Config.Env = append(fetchSpec.Config.Env, v.Name+"="+v.Value)
+	}
 	worker := l.spec(session, roleWorker, &container.Config{Image: l.cfg.SandboxImage}, []mount.Mount{workspace, run}, []string{"ALL"})
 	sidecar := l.spec(session, roleSidecar, &container.Config{Image: l.cfg.ToolImage, Cmd: []string{"sidecar"}, User: root}, []mount.Mount{run}, nil)
-	return []client.ContainerCreateOptions{fetch, worker, sidecar}
+	return []client.ContainerCreateOptions{fetchSpec, worker, sidecar}
 }
 
 func (l *Launcher) spec(session ids.SessionID, role string, cfg *container.Config, mounts []mount.Mount, drop []string) client.ContainerCreateOptions {

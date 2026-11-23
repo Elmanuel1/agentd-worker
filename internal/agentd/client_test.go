@@ -2,7 +2,6 @@ package agentd
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -108,16 +107,34 @@ func TestPoll(t *testing.T) {
 	}
 }
 
-// TestStopCarriesStatus holds SD-1's reading of 401 and 409.
-func TestStopCarriesStatus(t *testing.T) {
-	f := &fake{routes: map[string]answer{"POST /v1/environments/env_1/work/work_1/stop": route(409, `{"type":"error","error":{"type":"invalid_request_error","message":"stopped"}}`)}}
-	err := serve(t, f).Stop(t.Context(), "work_1")
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.HTTPStatus() != 409 || strings.Contains(err.Error(), "key") {
-		t.Errorf("stop error %v", err)
+// TestStop holds SD-1's and RP-1's readings of a stop: forced, a 409 already stopped, and a 401
+// already stopped only to the item's own token; an error names agentd's answer and no credential.
+func TestStop(t *testing.T) {
+	cases := []struct {
+		name      string
+		itemToken bool
+		status    int
+		failed    bool
+	}{
+		{"stopped", false, 200, false},
+		{"a 409 is stopped by another", false, 409, false},
+		{"a 401 to the environment key is an error", false, 401, true},
+		{"a 401 to the item's token is its end", true, 401, false},
+		{"a 500 is an error", true, 500, true},
 	}
-	if body := f.bodies["POST /v1/environments/env_1/work/work_1/stop"]; len(body) == 0 || body[0] != `{"force":true}` {
-		t.Errorf("stop body %q", body)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := &fake{routes: map[string]answer{"POST /v1/environments/env_1/work/work_1/stop": route(c.status, `{"type":"error","error":{"type":"invalid_request_error","message":"no"}}`)}}
+			client := serve(t, f)
+			client.itemToken = c.itemToken
+			err := client.Stop(t.Context(), "work_1")
+			if (err != nil) != c.failed || (err != nil && strings.Contains(err.Error(), "key")) {
+				t.Errorf("stop error %v", err)
+			}
+			if body := f.bodies["POST /v1/environments/env_1/work/work_1/stop"]; len(body) == 0 || body[0] != `{"force":true}` {
+				t.Errorf("stop body %q", body)
+			}
+		})
 	}
 }
 

@@ -97,7 +97,6 @@ func TestPass(t *testing.T) {
 		{"stopped within an interval before the last pass, by a lagging clock, is answered", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-90 * time.Second)}, nil, []string{"send s [tu_2 tu_3]"}},
 		{"stopped an interval before the last pass is left", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-2 * time.Minute)}, nil, nil},
 		{"a stopping item whose worker died is stopped", Item{Work: "w", Session: "s", State: StateStopping, Beat: now.Add(-7 * time.Minute)}, nil, []string{"stop w", "send s [tu_2 tu_3]"}},
-		{"a 409 is already stopped, and the calls are answered", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, conflict{}, []string{"stop w", "send s [tu_2 tu_3]"}},
 		{"a failed stop answers nothing", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, errors.New("503"), []string{"stop w"}},
 	}
 	for _, c := range cases {
@@ -162,8 +161,3 @@ func TestStatesOnlyStepForward(t *testing.T) {
 		}
 	}
 }
-
-type conflict struct{}
-
-func (conflict) Error() string   { return "409" }
-func (conflict) HTTPStatus() int { return 409 }

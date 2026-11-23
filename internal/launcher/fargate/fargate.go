@@ -14,6 +14,7 @@ import (
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 	"github.com/aws/aws-sdk-go-v2/service/efs"
 
+	"github.com/Elmanuel1/agentd-worker/internal/fetch"
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
 )
 
@@ -111,7 +112,7 @@ func (l *Launcher) Launch(ctx context.Context, session ids.SessionID, nonce ids.
 		}},
 		Overrides: &ecstypes.TaskOverride{ContainerOverrides: []ecstypes.ContainerOverride{{
 			Name:        aws.String(containerFetch),
-			Environment: []ecstypes.KeyValuePair{{Name: aws.String("AGENTD_HANDOFF_NONCE"), Value: aws.String(string(nonce))}},
+			Environment: []ecstypes.KeyValuePair{{Name: aws.String(fetch.EnvNonce), Value: aws.String(string(nonce))}},
 		}}},
 	})
 	if err != nil {

@@ -28,7 +28,7 @@ type FetchSettings struct {
 	URL   string        `envconfig:"AGENTD_HANDOFF_URL" required:"true"`
 	Nonce ids.Nonce     `envconfig:"AGENTD_HANDOFF_NONCE" required:"true"`
 	CA    string        `envconfig:"AGENTD_HANDOFF_CA" required:"true"`
-	Wait  time.Duration `envconfig:"AGENTD_HANDOFF_WAIT" default:"120s"`
+	Wait  time.Duration `envconfig:"AGENTD_HANDOFF_WAIT" required:"true"`
 	Dir   string        `envconfig:"CMA_SHARED_DIR" default:"/run/cma"`
 }
 
@@ -36,9 +36,6 @@ func runFetch(ctx context.Context, log *slog.Logger) error {
 	var s FetchSettings
 	if err := envconfig.Process("", &s); err != nil {
 		return err
-	}
-	if s.Wait <= 0 {
-		return errors.New("AGENTD_HANDOFF_WAIT must be positive")
 	}
 	cfg := fetch.Config{URL: s.URL, Nonce: s.Nonce, Dir: s.Dir, UID: workerUID, GID: workerGID, Every: 2 * time.Second, Wait: s.Wait}
 	roots := x509.NewCertPool()
@@ -68,7 +65,7 @@ func runSidecar(ctx context.Context, log *slog.Logger) error {
 	}
 	cfg := sidecar.Config{Dir: s.Dir, Every: time.Second}
 	connect := func(baseURL string, env ids.EnvironmentID, token ids.WorkToken) sidecar.Items {
-		return agentd.New(baseURL, env, token.Reveal(), requestTimeout)
+		return agentd.ForItem(baseURL, env, token, requestTimeout)
 	}
 	if err := sidecar.Run(ctx, cfg, connect); err != nil {
 		return err

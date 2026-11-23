@@ -5,6 +5,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	"github.com/aws/aws-sdk-go-v2/service/ecs/types"
 
+	"github.com/Elmanuel1/agentd-worker/internal/fetch"
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
 )
 
@@ -23,6 +24,10 @@ const (
 func (l *Launcher) taskDefinition(session ids.SessionID, accessPoint string) *ecs.RegisterTaskDefinitionInput {
 	run := types.MountPoint{SourceVolume: aws.String(volumeRun), ContainerPath: aws.String("/run/cma")}
 	workspace := types.MountPoint{SourceVolume: aws.String(volumeWorkspace), ContainerPath: aws.String("/workspace")}
+	var fetchEnv []types.KeyValuePair
+	for _, v := range fetch.Env(l.cfg.HandoffURL, l.cfg.HandoffCA, l.cfg.HandoffWait) {
+		fetchEnv = append(fetchEnv, types.KeyValuePair{Name: aws.String(v.Name), Value: aws.String(v.Value)})
+	}
 	return &ecs.RegisterTaskDefinitionInput{
 		Family:                  aws.String(family(session)),
 		RequiresCompatibilities: []types.Compatibility{types.CompatibilityFargate},
@@ -43,12 +48,8 @@ func (l *Launcher) taskDefinition(session ids.SessionID, accessPoint string) *ec
 		ContainerDefinitions: []types.ContainerDefinition{
 			{
 				Name: aws.String(containerFetch), Image: aws.String(l.cfg.ToolImage), Command: []string{"fetch"}, User: aws.String("0"),
-				Essential: aws.Bool(false),
-				Environment: []types.KeyValuePair{
-					{Name: aws.String("AGENTD_HANDOFF_URL"), Value: aws.String(l.cfg.HandoffURL)},
-					{Name: aws.String("AGENTD_HANDOFF_CA"), Value: aws.String(l.cfg.HandoffCA)},
-					{Name: aws.String("AGENTD_HANDOFF_WAIT"), Value: aws.String(l.cfg.HandoffWait.String())},
-				},
+				Essential:        aws.Bool(false),
+				Environment:      fetchEnv,
 				MountPoints:      []types.MountPoint{run},
 				LogConfiguration: l.logs(containerFetch),
 			},
