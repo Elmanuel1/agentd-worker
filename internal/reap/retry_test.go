@@ -49,10 +49,10 @@ func TestFailedCallIsRetried(t *testing.T) {
 	})
 }
 
-// TestUntimedStopIsAnsweredByTheListedTime holds RP-1 when agentd gives a stopped item no time,
-// on the stop's answer or in its list: the pass answers nothing and retries, the next answers by
-// the stop time agentd lists, however long ago, and one still listed with no time is retried
-// again; no cutoff is ever this clock's.
+// TestUntimedStopIsAnsweredByTheListedTime holds RP-1 and RP-2 when agentd gives a stopped item no
+// time, on the stop's answer or in its list: the pass answers nothing and retries, the next
+// answers by the stop time agentd lists, however long ago, and one still listed with no time is
+// retried again; no cutoff is ever this clock's.
 func TestUntimedStopIsAnsweredByTheListedTime(t *testing.T) {
 	now := time.Now()
 	stale := Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}
