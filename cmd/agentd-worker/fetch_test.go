@@ -50,7 +50,7 @@ func TestFetchLogsEndings(t *testing.T) {
 			t.Setenv("CMA_SHARED_DIR", t.TempDir())
 			ctx, cancel := context.WithCancel(t.Context())
 			if c.stopped {
-				time.AfterFunc(100*time.Millisecond, cancel)
+				cancel()
 			}
 			defer cancel()
 			var out bytes.Buffer

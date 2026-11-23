@@ -38,8 +38,8 @@ var (
 	ErrRefused = errors.New("the controller refused the work item")
 	// ErrTimeout means the handoff wait passed with no item.
 	ErrTimeout = errors.New("no work item within the handoff wait")
-	// ErrMalformed means the controller answered with an item missing a field; asking again gets
-	// the same.
+	// ErrMalformed means the controller answered with an item missing a field. Sending it spent
+	// the nonce, so asking again is refused.
 	ErrMalformed = errors.New("the work item is missing a field")
 )
 
