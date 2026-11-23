@@ -1,6 +1,7 @@
 package reap
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -24,8 +25,10 @@ type fakeAgentd struct {
 	items   []Item
 	events  map[ids.SessionID][]Event
 	stopErr map[ids.WorkID]error
-	// stoppedAt is the stop agentd records for a stopped item, zero for none.
+	// stoppedAt is the stop agentd records, now when zero, as agentd stamps it; untimed answers
+	// a stop with no time.
 	stoppedAt time.Time
+	untimed   bool
 	sendErr   error
 	pages     int
 	calls     []string // "stop sesn" and "send sesn ids", in order
@@ -48,7 +51,10 @@ func (f *fakeAgentd) Stop(_ context.Context, s ids.WorkID) (time.Time, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "stop "+string(s))
-	return f.stoppedAt, f.stopErr[s]
+	if f.untimed {
+		return time.Time{}, f.stopErr[s]
+	}
+	return cmp.Or(f.stoppedAt, time.Now()), f.stopErr[s]
 }
 
 type events struct{ f *fakeAgentd }
@@ -103,8 +109,8 @@ func TestPass(t *testing.T) {
 		{"stopped within an interval before the last pass, by a lagging clock, is answered", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-90 * time.Second)}, nil, nil, []string{"send s [tu_2 tu_3]"}, time.Time{}},
 		{"stopped an interval before the last pass is left", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-2 * time.Minute)}, nil, nil, nil, time.Time{}},
 		{"a stopping item whose worker died is stopped", Item{Work: "w", Session: "s", State: StateStopping, Beat: now.Add(-7 * time.Minute)}, nil, nil, []string{"stop w", "send s [tu_2 tu_3]"}, time.Time{}},
-		{"a stale item agentd records no stop for owes only calls made by this pass", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, nil,
-			[]Event{{Type: ToolUse, ID: "dead", At: now.Add(-time.Minute)}, {Type: ToolUse, ID: "live", At: now.Add(time.Second)}}, []string{"stop w", "send s [dead]"}, time.Time{}},
+		{"a stale item owes only calls made by agentd's stop of it", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, nil,
+			[]Event{{Type: ToolUse, ID: "dead", At: now.Add(-time.Minute)}, {Type: ToolUse, ID: "live", At: now.Add(time.Second)}}, []string{"stop w", "send s [dead]"}, now},
 		{"a failed stop answers nothing", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, errors.New("503"), nil, []string{"stop w"}, time.Time{}},
 		{"a stale item owes calls made by agentd's stop, though its clock lags this one", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, nil,
 			[]Event{{Type: ToolUse, ID: "dead", At: now.Add(-time.Minute)}, {Type: ToolUse, ID: "live", At: now.Add(-10 * time.Second)}}, []string{"stop w", "send s [dead]"}, now.Add(-30 * time.Second)},

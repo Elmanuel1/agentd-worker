@@ -1,10 +1,9 @@
 package reap
 
 import (
-	"cmp"
 	"context"
+	"errors"
 	"fmt"
-	"time"
 )
 
 // Stale is an active or starting item whose worker stopped beating.
@@ -13,15 +12,19 @@ type Stale struct {
 }
 
 // Stop stops the item, so the session's next tool call queues it again. Its calls are those made
-// by the stop agentd records: a replacement worker's come after the requeue that follows it. With
-// no time recorded, the pass's own, now, stands in.
-func (s Stale) Stop(ctx context.Context, items Items, now time.Time) (Stopped, error) {
+// by the stop agentd records: a replacement worker's come after the requeue that follows it. A
+// stop agentd answers with no time is a failure, so the next pass answers it as a stopped item
+// with the time agentd lists, never by this clock.
+func (s Stale) Stop(ctx context.Context, items Items) (Stopped, error) {
 	at, err := items.Stop(ctx, s.item.Work)
+	if err == nil && at.IsZero() {
+		err = errors.New("agentd recorded no stop time")
+	}
 	if err != nil {
 		return Stopped{}, fmt.Errorf("stopping item %s: %w", s.item.Session, err)
 	}
 	stopped := s.item
-	stopped.StoppedAt = cmp.Or(at, now)
+	stopped.StoppedAt = at
 	return Stopped{item: stopped, reaped: true}, nil
 }
 

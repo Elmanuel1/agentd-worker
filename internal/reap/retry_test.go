@@ -48,3 +48,22 @@ func TestFailedCallIsRetried(t *testing.T) {
 		}
 	})
 }
+
+// TestUntimedStopIsAnsweredByTheListedTime holds RP-1 when agentd answers a stop with no time: the
+// pass answers nothing and retries, and the next answers by the stop time agentd lists, never by
+// this clock.
+func TestUntimedStopIsAnsweredByTheListedTime(t *testing.T) {
+	now := time.Now()
+	log := []Event{{Type: ToolUse, ID: "dead", At: now.Add(-time.Minute)}, {Type: ToolUse, ID: "live", At: now.Add(-10 * time.Second)}}
+	f := &fakeAgentd{items: []Item{{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}}, events: map[ids.SessionID][]Event{"s": log}, untimed: true}
+	r := newReaper(t, f)
+	r.passAt(t.Context(), now)
+	if want := []string{"stop w"}; !slices.Equal(f.calls, want) {
+		t.Fatalf("first pass %v, want %v", f.calls, want)
+	}
+	f.items, f.calls = []Item{{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-30 * time.Second)}}, nil
+	r.passAt(t.Context(), now.Add(time.Minute))
+	if want := []string{"send s [dead]"}; !slices.Equal(f.calls, want) {
+		t.Errorf("next pass %v, want %v", f.calls, want)
+	}
+}
