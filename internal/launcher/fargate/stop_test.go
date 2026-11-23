@@ -94,3 +94,26 @@ func TestStopWaitsUntilStopped(t *testing.T) {
 		}
 	})
 }
+
+// unlisted is ECS before ListTasks catches up: it lists no task.
+type unlisted struct{ *fakeAWS }
+
+func (unlisted) ListTasks(context.Context, *ecs.ListTasksInput, ...func(*ecs.Options)) (*ecs.ListTasksOutput, error) {
+	return &ecs.ListTasksOutput{}, nil
+}
+
+// TestStopsATaskNotYetListed holds FG-3 while ListTasks lags: the task the last Launch ran is
+// stopped by its ARN, and Stop forgets it only once it has.
+func TestStopsATaskNotYetListed(t *testing.T) {
+	f := unlisted{newFake()}
+	l := New(f, f, f, cfg)
+	if err := l.Launch(t.Context(), "sesn_1", "n1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Stop(t.Context(), "sesn_1"); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := f.running(t.Context(), "sesn_1"); n != 0 || l.tasks["sesn_1"] != "" {
+		t.Errorf("after Stop: %d running, known %q", n, l.tasks["sesn_1"])
+	}
+}

@@ -22,7 +22,6 @@ func (l *Launcher) listTasks(ctx context.Context, session ids.SessionID) ([]ecst
 	return l.tasksOf(ctx, in)
 }
 
-// tasksOf lists the tasks in matches and describes them.
 func (l *Launcher) tasksOf(ctx context.Context, in *ecs.ListTasksInput) ([]ecstypes.Task, error) {
 	var arns []string
 	for p := ecs.NewListTasksPaginator(l.ecs, in); p.HasMorePages(); {

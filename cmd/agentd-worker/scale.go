@@ -85,8 +85,7 @@ func runScale(ctx context.Context, log *slog.Logger) error {
 	return g.Wait()
 }
 
-// dispatchConfig reads the controller's settings. The handoff wait defaults to 120 s, and on
-// Fargate to the most its start timeout leaves room for.
+// On Fargate the handoff wait defaults to the most its start timeout leaves room for.
 func dispatchConfig(e *env, launcher string) dispatch.Config {
 	wait := 120
 	if launcher == "fargate" {
