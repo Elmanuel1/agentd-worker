@@ -1,0 +1,23 @@
+# Lets sandbox pods reach the egress proxy, which none of the chart's own policies allow. The chart
+# installs its policies in the release namespace (cma); the proxy runs in agentd-proxy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agentd-sandbox-to-proxy
+  namespace: cma
+spec:
+  podSelector:
+    matchLabels:
+      anthropic.com/role: sandbox
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agentd-proxy
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agentd-proxy
+      ports:
+        - protocol: TCP
+          port: 3128

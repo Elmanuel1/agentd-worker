@@ -1,0 +1,43 @@
+# Karpenter nodes for sandboxes, on demand: Karpenter never takes a node that runs a sandbox. A node
+# goes once it is empty, so the pool still scales to zero, and a node drifted by an AMI bump is
+# replaced when it empties instead of drained. Labelled and tainted as the chart's RuntimeClass
+# expects; the cluster's CNI is Cilium, so cilium-egress.yaml applies.
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: agentd-sandboxes
+spec:
+  template:
+    metadata:
+      labels:
+        cma.anthropic.com/sandbox-node: "true"
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: agentd-sandboxes
+      taints:
+        - key: cma.anthropic.com/sandbox-node
+          value: "true"
+          effect: NoSchedule
+      # Expiry drains a node whatever the budgets say, so it is off.
+      expireAfter: Never
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["arm64"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+        - key: karpenter.k8s.aws/instance-category
+          operator: In
+          values: ["c", "m", "r"]
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 5m
+    budgets:
+      - nodes: "10%"
+      - nodes: "0"
+        reasons: ["Drifted"]
+  limits:
+    cpu: "2000"

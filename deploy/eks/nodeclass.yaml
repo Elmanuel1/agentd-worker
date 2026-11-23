@@ -1,0 +1,54 @@
+# The node class both node pools use: Graviton, gVisor's runsc installed at boot. Apply it with one
+# of nodepool-on-demand.yaml or nodepool-spot.yaml.
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: agentd-sandboxes
+spec:
+  amiSelectorTerms:
+    # Pinned, as Karpenter advises for production; bump with the gVisor release below.
+    - alias: al2023@v20261119
+  role: agentd-sandbox-nodes
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: agentd
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: agentd
+  metadataOptions:
+    httpTokens: required
+    httpPutResponseHopLimit: 1
+  userData: |
+    MIME-Version: 1.0
+    Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+    --BOUNDARY
+    Content-Type: text/x-shellscript; charset="us-ascii"
+
+    #!/bin/bash
+    set -euo pipefail
+    # A node that cannot run runsc must not join: the chart's RuntimeClass would place sandboxes
+    # on it that never start. Karpenter replaces a node that powers off.
+    trap 'poweroff' ERR
+    # gVisor release 20261116 for arm64, checked against the sha512 read from its release on 2026-11-22.
+    # Bump the release and the digest together.
+    release=20261116
+    sha512=a64ce2d5ba6825a0a6459ee6a9ce40164749c2d276a945b885673988c4e545e66b2f4ef3a08e068a26cca676061c8c5e8ba982156feb786f0eab995f5b8b854d
+    cd /tmp
+    curl -fsSLo gvisor.tar.bz2 "https://storage.googleapis.com/gvisor/releases/release/$release/aarch64/gvisor.tar.bz2"
+    echo "$sha512  gvisor.tar.bz2" | sha512sum -c -
+    # runsc runs the binaries in gvisor-bin/ beside it, so the whole archive goes in one place.
+    tar -xjf gvisor.tar.bz2 --no-same-owner -C /usr/local/bin
+
+    --BOUNDARY
+    Content-Type: application/node.eks.aws
+
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      containerd:
+        config: |
+          [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
+            runtime_type = "io.containerd.runsc.v1"
+
+    --BOUNDARY--

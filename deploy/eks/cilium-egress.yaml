@@ -1,0 +1,23 @@
+# Denies every public egress from sandbox pods except to agentd. Kubernetes NetworkPolicies only
+# add allowances, so the chart's publicInternet policy cannot be narrowed by another one; a Cilium
+# deny rule wins over every allow. With it, sandboxes reach the cluster's DNS and the proxy (pod
+# addresses, not public) and agentd, and nothing else. Set the agentd CIDR to egress.cmaServer.cidr.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agentd-sandbox-deny-public
+  namespace: cma
+spec:
+  endpointSelector:
+    matchLabels:
+      anthropic.com/role: sandbox
+  egressDeny:
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except:
+            # The cluster's pod and service ranges: DNS and the proxy.
+            - 10.0.0.0/8
+            # agentd, as in egress.cmaServer.cidr.
+            - 203.0.113.10/32
+    - toCIDRSet:
+        - cidr: ::/0

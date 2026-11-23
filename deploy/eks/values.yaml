@@ -1,0 +1,42 @@
+# Values for Anthropic's cma-sandboxes chart (anthropic-cli sandboxes/kubernetes/chart), installed
+# unchanged for our cloud on EKS:
+#
+#   helm install cma <anthropic-cli>/sandboxes/kubernetes/chart -n cma -f deploy/eks/values.yaml \
+#     --set image.registry=<ecr>/cma --set image.sandboxDigest=<digest> --set image.dispatcherDigest=<digest> \
+#     --set egress.cmaServer.cidr=<agentd's address>/32
+#
+# The Secret cma-environment holds ANTHROPIC_BASE_URL (agentd), and for the runtime queue
+# ANTHROPIC_ENVIRONMENT_ID=runtime with agentd's runtime key as ANTHROPIC_ENVIRONMENT_KEY; for a
+# self-hosted environment, its id and environment key. docs/eks.md has the steps.
+platform: eks
+environment:
+  secretName: cma-environment
+image:
+  # Both images come from this one registry: our sandbox image, and Anthropic's dispatcher mirrored
+  # by digest.
+  registry: ""
+  dispatcher: cma-dispatcher
+  sandbox: agentd-sandbox
+  dispatcherDigest: ""
+  sandboxDigest: ""
+runtimeClass:
+  name: gvisor
+  # The chart's RuntimeClass pins sandboxes to nodes labelled and tainted
+  # cma.anthropic.com/sandbox-node=true, which both node pools give our runsc nodes.
+  create: true
+sandbox:
+  idleTimeout: 30m
+  workspace:
+    size: 10Gi
+    storageClassName: gp3
+egress:
+  # A NetworkPolicy cannot narrow this mode; cilium-egress.yaml denies all public egress but agentd.
+  mode: publicInternet
+  # Our cloud's cluster has a private API endpoint, inside the chart's private ranges. A cluster
+  # with a public endpoint lists each address its host name resolves to here, as a /32, and sets
+  # clusterIsPrivate to false.
+  clusterCIDRs: []
+  clusterIsPrivate: true
+  cmaServer:
+    cidr: ""
+    port: 443

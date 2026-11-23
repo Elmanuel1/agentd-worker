@@ -1,0 +1,192 @@
+{
+ "default": [
+  {
+   "content": [
+    {
+     "type": "text",
+     "text": "ok"
+    }
+   ],
+   "stop": "end_turn",
+   "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+   },
+   "thought": false
+  }
+ ],
+ "e2e-tool": [
+  {
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "toolu_tool",
+     "name": "bash",
+     "input": {
+      "command": "echo tool-ok"
+     }
+    }
+   ],
+   "stop": "tool_use",
+   "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+   },
+   "thought": true
+  },
+  {
+   "content": [
+    {
+     "type": "text",
+     "text": "done"
+    }
+   ],
+   "stop": "end_turn",
+   "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+   },
+   "thought": false
+  }
+ ],
+ "e2e-env": [
+  {
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "toolu_env",
+     "name": "bash",
+     "input": {
+      "command": "env"
+     }
+    }
+   ],
+   "stop": "tool_use",
+   "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+   },
+   "thought": true
+  },
+  {
+   "content": [
+    {
+     "type": "text",
+     "text": "done"
+    }
+   ],
+   "stop": "end_turn",
+   "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+   },
+   "thought": false
+  }
+ ],
+ "e2e-kill": [
+  {
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "toolu_sleep",
+     "name": "bash",
+     "input": {
+      "command": "sleep 600"
+     }
+    }
+   ],
+   "stop": "tool_use",
+   "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+   },
+   "thought": true
+  },
+  {
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "toolu_after",
+     "name": "bash",
+     "input": {
+      "command": "echo after-kill"
+     }
+    }
+   ],
+   "stop": "tool_use",
+   "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+   },
+   "thought": true
+  },
+  {
+   "content": [
+    {
+     "type": "text",
+     "text": "done"
+    }
+   ],
+   "stop": "end_turn",
+   "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+   },
+   "thought": false
+  }
+ ],
+ "e2e-restart": [
+  {
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "toolu_restart",
+     "name": "bash",
+     "input": {
+      "command": "echo restarted"
+     }
+    }
+   ],
+   "stop": "tool_use",
+   "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+   },
+   "thought": true
+  },
+  {
+   "content": [
+    {
+     "type": "text",
+     "text": "done"
+    }
+   ],
+   "stop": "end_turn",
+   "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+   },
+   "thought": false
+  }
+ ]
+}

@@ -1,0 +1,4 @@
+/agentd-worker
+/e2e/out/
+.terraform/
+*.tfstate*
