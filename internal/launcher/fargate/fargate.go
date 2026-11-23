@@ -123,14 +123,7 @@ func (l *Launcher) Launch(ctx context.Context, session ids.SessionID, nonce ids.
 	known := l.tasks[session]
 	l.mu.Unlock()
 	if known.arn != "" && known.nonce == nonce {
-		tasks, err := l.describeTasks(ctx, []string{known.arn})
-		running := slices.ContainsFunc(tasks, func(t ecstypes.Task) bool {
-			return aws.ToString(t.DesiredStatus) == string(ecstypes.DesiredStatusRunning)
-		})
-		if err != nil || running || (len(tasks) == 0 && known.settling()) {
-			return err
-		}
-		return fmt.Errorf("launching session %s: its nonce already ran a task, which stopped", session)
+		return l.relaunched(ctx, session, known)
 	}
 	if err := l.Stop(ctx, session); err != nil {
 		return err
@@ -167,4 +160,17 @@ func (l *Launcher) Launch(ctx context.Context, session ids.SessionID, nonce ids.
 	l.tasks[session] = launched{arn: aws.ToString(out.Tasks[0].TaskArn), at: time.Now(), nonce: nonce}
 	l.mu.Unlock()
 	return nil
+}
+
+// relaunched answers a Launch repeating the nonce of the task it ran: that task still running, or
+// one ECS does not return yet so soon after its launch, is this launch; one stopped is an error.
+func (l *Launcher) relaunched(ctx context.Context, session ids.SessionID, known launched) error {
+	tasks, err := l.describeTasks(ctx, []string{known.arn})
+	running := slices.ContainsFunc(tasks, func(t ecstypes.Task) bool {
+		return aws.ToString(t.DesiredStatus) == string(ecstypes.DesiredStatusRunning)
+	})
+	if err != nil || running || (len(tasks) == 0 && known.settling()) {
+		return err
+	}
+	return fmt.Errorf("launching session %s: its nonce already ran a task, which stopped", session)
 }

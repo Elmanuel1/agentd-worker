@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -101,30 +102,37 @@ func TestLaunchAndRelease(t *testing.T) {
 }
 
 // TestRelaunchUnderOneNonce holds FG-1's repeated Launch: it keeps a task ECS does not return yet,
-// as Stop does, and fails when the nonce's task stopped, since ECS would only replay it.
+// as Stop does, and fails when the nonce's task stopped, or ECS dropped it past its retention,
+// since ECS would only replay it.
 func TestRelaunchUnderOneNonce(t *testing.T) {
+	hide := func(f *fakeAWS) ECS { return &hidden{unlisted{&lagging{fakeAWS: f, seen: map[string]bool{}}}, -1} }
 	cases := []struct {
 		name    string
 		ecs     func(*fakeAWS) ECS
 		stopped bool
+		later   time.Duration
 		failed  bool
 	}{
-		{"a task ECS does not return yet is this launch", func(f *fakeAWS) ECS { return &hidden{unlisted{&lagging{fakeAWS: f, seen: map[string]bool{}}}, -1} }, false, false},
-		{"a stopped task cannot run again", func(f *fakeAWS) ECS { return f }, true, true},
+		{"a task ECS does not return yet is this launch", hide, false, 0, false},
+		{"a task ECS dropped past its retention cannot run again", hide, true, 2 * taskRetention, true},
+		{"a stopped task cannot run again", func(f *fakeAWS) ECS { return f }, true, 0, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			f := newFake()
-			l := open(t, c.ecs(f), f, cfg)
-			if err := l.Launch(t.Context(), "sesn_1", "n1"); err != nil {
-				t.Fatal(err)
-			}
-			if c.stopped {
-				f.StopTask(t.Context(), &ecs.StopTaskInput{Task: aws.String(l.tasks["sesn_1"].arn)})
-			}
-			if err := l.Launch(t.Context(), "sesn_1", "n1"); (err != nil) != c.failed {
-				t.Errorf("repeated launch: %v", err)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				f := newFake()
+				l := open(t, c.ecs(f), f, cfg)
+				if err := l.Launch(t.Context(), "sesn_1", "n1"); err != nil {
+					t.Fatal(err)
+				}
+				if c.stopped {
+					f.StopTask(t.Context(), &ecs.StopTaskInput{Task: aws.String(l.tasks["sesn_1"].arn)})
+				}
+				time.Sleep(c.later)
+				if err := l.Launch(t.Context(), "sesn_1", "n1"); (err != nil) != c.failed {
+					t.Errorf("repeated launch: %v", err)
+				}
+			})
 		})
 	}
 }

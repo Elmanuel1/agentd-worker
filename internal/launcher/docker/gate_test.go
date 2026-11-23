@@ -8,51 +8,60 @@ import (
 )
 
 // TestGate holds DK-3 against workers starting during Stop: Stop waits out every start under way,
-// gives up when its context ends, and no worker starts while a Stop runs, nor is one kept from
-// starting after.
+// in either order they end, gives up when its context ends, and no worker starts while a Stop
+// runs, nor is one kept from starting after.
 func TestGate(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		g := newGate()
-		first, ok1 := g.start("sesn_1")
-		second, ok2 := g.start("sesn_1")
-		if !ok1 || !ok2 {
-			t.Fatal("a start with no Stop was refused")
-		}
-		stopped := make(chan func())
-		go func() {
-			release, _ := g.stop(t.Context(), "sesn_1")
-			stopped <- release
-		}()
-		first()
-		synctest.Wait()
-		select {
-		case <-stopped:
-			t.Fatal("Stop went ahead of a start under way")
-		default:
-		}
-		second()
-		release := <-stopped
-		if _, ok := g.start("sesn_1"); ok {
-			t.Error("a worker started while a Stop ran")
-		}
-		other, ok := g.start("sesn_2")
-		if !ok {
-			t.Error("a Stop of one session held off another's worker")
-		}
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
-		if _, err := g.stop(ctx, "sesn_2"); !errors.Is(err, context.Canceled) {
-			t.Errorf("a Stop whose context ended waited on: %v", err)
-		}
-		other()
-		release()
-		if _, ok := g.start("sesn_1"); !ok {
-			t.Error("a worker was kept from starting after the Stop")
-		}
-		if _, ok := g.start("sesn_2"); !ok {
-			t.Error("a Stop that gave up kept holding starts off")
-		}
-	})
+	// Stop waits on a start it picks at random, so each order runs often enough to catch a Stop
+	// that waits on only one.
+	for i := range 32 {
+		firstEnds := i % 2
+		synctest.Test(t, func(t *testing.T) {
+			g := newGate()
+			var ends []func()
+			for range 2 {
+				end, ok := g.start("sesn_1")
+				if !ok {
+					t.Fatal("a start with no Stop was refused")
+				}
+				ends = append(ends, end)
+			}
+			stopped := make(chan func())
+			go func() {
+				release, _ := g.stop(t.Context(), "sesn_1")
+				stopped <- release
+			}()
+			for _, end := range []func(){ends[firstEnds], ends[1-firstEnds]} {
+				synctest.Wait()
+				select {
+				case <-stopped:
+					t.Fatal("Stop went ahead of a start under way")
+				default:
+				}
+				end()
+			}
+			release := <-stopped
+			if _, ok := g.start("sesn_1"); ok {
+				t.Error("a worker started while a Stop ran")
+			}
+			other, ok := g.start("sesn_2")
+			if !ok {
+				t.Error("a Stop of one session held off another's worker")
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			if _, err := g.stop(ctx, "sesn_2"); !errors.Is(err, context.Canceled) {
+				t.Errorf("a Stop whose context ended waited on: %v", err)
+			}
+			other()
+			release()
+			if _, ok := g.start("sesn_1"); !ok {
+				t.Error("a worker was kept from starting after the Stop")
+			}
+			if _, ok := g.start("sesn_2"); !ok {
+				t.Error("a Stop that gave up kept holding starts off")
+			}
+		})
+	}
 }
 
 // TestStopWaitsOutAWorkerStart holds that Stop goes through the gate before it reads the session.
