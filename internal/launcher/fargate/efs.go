@@ -23,10 +23,10 @@ func (l *Launcher) accessPoint(ctx context.Context, session ids.SessionID) (stri
 	out, err := l.efs.CreateAccessPoint(ctx, &efs.CreateAccessPointInput{
 		ClientToken:  aws.String(string(session)),
 		FileSystemId: aws.String(l.cfg.FileSystemID),
-		PosixUser:    &efstypes.PosixUser{Uid: aws.Int64(1001), Gid: aws.Int64(1000)},
+		PosixUser:    &efstypes.PosixUser{Uid: aws.Int64(l.cfg.WorkerUID), Gid: aws.Int64(l.cfg.WorkerGID)},
 		RootDirectory: &efstypes.RootDirectory{
-			Path:         aws.String(sessionDir(session)),
-			CreationInfo: &efstypes.CreationInfo{OwnerUid: aws.Int64(1001), OwnerGid: aws.Int64(1000), Permissions: aws.String("0750")},
+			Path:         aws.String("/" + sessionDir(session)),
+			CreationInfo: &efstypes.CreationInfo{OwnerUid: aws.Int64(l.cfg.WorkerUID), OwnerGid: aws.Int64(l.cfg.WorkerGID), Permissions: aws.String("0750")},
 		},
 		Tags: []efstypes.Tag{{Key: aws.String(tagSession), Value: aws.String(string(session))}},
 	})

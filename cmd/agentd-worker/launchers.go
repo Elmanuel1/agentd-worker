@@ -7,7 +7,11 @@ import (
 	"time"
 
 	"github.com/Elmanuel1/agentd-worker/internal/dispatch"
+	"github.com/Elmanuel1/agentd-worker/internal/launcher/fargate"
 )
+
+// Anthropic's sandbox image runs the worker as uid 1001 in group 1000.
+const workerUID, workerGID = 1001, 1000
 
 // backend is a Launcher and its Locator, closed on shutdown.
 type backend interface {
@@ -36,7 +40,7 @@ func launcherNamed(name string) (launcher, error) {
 	case "docker":
 		return launcher{handoffWait: 120 * time.Second, open: openDocker}, nil
 	case "fargate":
-		return launcher{handoffWait: fargateMaxWait, open: openFargate}, nil
+		return launcher{handoffWait: fargate.MaxHandoffWait, open: openFargate}, nil
 	default:
 		return launcher{}, fmt.Errorf("AGENTD_WORKER_LAUNCHER %q: want docker or fargate", name)
 	}

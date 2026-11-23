@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
-	"path"
 	"slices"
 	"time"
 
@@ -61,14 +60,14 @@ func (l *Launcher) Address(ctx context.Context, session ids.SessionID) (netip.Ad
 func addressOf(tasks []ecstypes.Task, err error) (netip.Addr, bool, error) {
 	running := false
 	for _, t := range tasks {
-		if aws.ToString(t.DesiredStatus) != "RUNNING" {
+		if aws.ToString(t.DesiredStatus) != string(ecstypes.DesiredStatusRunning) {
 			continue
 		}
 		running = true
 		fetchRuns := slices.ContainsFunc(t.Containers, func(c ecstypes.Container) bool {
-			return aws.ToString(c.Name) == containerFetch && aws.ToString(c.LastStatus) == "RUNNING"
+			return aws.ToString(c.Name) == containerFetch && aws.ToString(c.LastStatus) == string(ecstypes.DesiredStatusRunning)
 		})
-		if aws.ToString(t.LastStatus) != "RUNNING" && !fetchRuns {
+		if aws.ToString(t.LastStatus) != string(ecstypes.DesiredStatusRunning) && !fetchRuns {
 			continue
 		}
 		for _, a := range t.Attachments {
@@ -117,7 +116,7 @@ func (l *Launcher) Stop(ctx context.Context, session ids.SessionID) error {
 			continue
 		}
 		arns = append(arns, arn)
-		if aws.ToString(t.DesiredStatus) == "RUNNING" {
+		if aws.ToString(t.DesiredStatus) == string(ecstypes.DesiredStatusRunning) {
 			_, err := l.ecs.StopTask(ctx, &ecs.StopTaskInput{Cluster: aws.String(l.cfg.Cluster), Task: t.TaskArn, Reason: aws.String("agentd-worker stopped the sandbox")})
 			errs = append(errs, err)
 		}
@@ -138,7 +137,7 @@ func (l *Launcher) Stop(ctx context.Context, session ids.SessionID) error {
 		if err != nil {
 			return err
 		}
-		if !slices.ContainsFunc(append(listed, stopped...), func(t ecstypes.Task) bool { return aws.ToString(t.LastStatus) != "STOPPED" }) {
+		if !slices.ContainsFunc(append(listed, stopped...), func(t ecstypes.Task) bool { return aws.ToString(t.LastStatus) != string(ecstypes.DesiredStatusStopped) }) {
 			break
 		}
 		select {
@@ -162,7 +161,7 @@ func (l *Launcher) Release(ctx context.Context, session ids.SessionID) error {
 	if err := l.Stop(ctx, session); err != nil {
 		return err
 	}
-	if err := l.dirs.RemoveAll(path.Join(l.cfg.RootMount, sessionDir(session))); err != nil {
+	if err := l.root.RemoveAll(sessionDir(session)); err != nil {
 		return fmt.Errorf("removing the session's directory: %w", err)
 	}
 	if err := l.deleteFamily(ctx, session); err != nil {

@@ -27,17 +27,23 @@ type Item struct {
 	Secret        string            `json:"secret"`
 }
 
-// Server answers GET /work-item from a Store.
+// Locator finds a sandbox's address while it runs.
+type Locator interface {
+	Address(ctx context.Context, session ids.SessionID) (addr netip.Addr, running bool, err error)
+}
+
+// Server answers GET /work-item from a Store, to the running sandbox's own address only.
 type Server struct {
 	store   *Store
+	locator Locator
 	env     ids.EnvironmentID
 	baseURL string
 	log     *slog.Logger
 }
 
-// NewServer serves store's items, telling each sandbox env and the agentd base URL.
-func NewServer(store *Store, env ids.EnvironmentID, baseURL string, log *slog.Logger) *Server {
-	return &Server{store: store, env: env, baseURL: baseURL, log: log}
+// NewServer serves store's items to the sandboxes locator finds, telling each env and the agentd base URL.
+func NewServer(store *Store, locator Locator, env ids.EnvironmentID, baseURL string, log *slog.Logger) *Server {
+	return &Server{store: store, locator: locator, env: env, baseURL: baseURL, log: log}
 }
 
 // Handler routes GET /work-item and GET /healthz.
@@ -81,7 +87,7 @@ func (s *Server) authorize(r *http.Request) (ids.SessionID, *entry, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	addr, running, err := s.store.locator.Address(r.Context(), session)
+	addr, running, err := s.locator.Address(r.Context(), session)
 	host, _, _ := net.SplitHostPort(r.RemoteAddr)
 	peer, peerErr := netip.ParseAddr(host)
 	switch {

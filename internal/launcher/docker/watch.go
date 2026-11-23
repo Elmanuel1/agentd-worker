@@ -13,7 +13,7 @@ import (
 
 // startWorker starts the worker once fetch exits 0, then watches it; a fetch that fails removes
 // the sandbox at once.
-func (l *Launcher) startWorker(ctx context.Context, session ids.SessionID, byRole map[string]string) {
+func (l *Launcher) startWorker(ctx context.Context, session ids.SessionID, byRole map[role]string) {
 	code, err := l.waitExit(ctx, byRole[roleFetch])
 	if ctx.Err() != nil {
 		return
@@ -31,18 +31,15 @@ func (l *Launcher) startWorker(ctx context.Context, session ids.SessionID, byRol
 	l.watchWorker(ctx, session, byRole)
 }
 
-// sidecarGrace is the seconds the sidecar gets to stop the item.
-const sidecarGrace = 15
-
 // watchWorker stops the sidecar when the worker exits, so it stops the item, then removes the
 // sandbox's containers.
-func (l *Launcher) watchWorker(ctx context.Context, session ids.SessionID, byRole map[string]string) {
+func (l *Launcher) watchWorker(ctx context.Context, session ids.SessionID, byRole map[role]string) {
 	code, err := l.waitExit(ctx, byRole[roleWorker])
 	if ctx.Err() != nil || err != nil {
 		return
 	}
 	l.log.Info("worker exited", "session_id", session, "exit_code", code)
-	timeout := sidecarGrace
+	timeout := roleSidecar.grace()
 	if _, err := l.cli.ContainerStop(ctx, byRole[roleSidecar], client.ContainerStopOptions{Timeout: &timeout}); err != nil && !cerrdefs.IsNotFound(err) {
 		l.log.Warn("stopping the sidecar failed", "session_id", session, "error", err)
 	}
@@ -80,7 +77,7 @@ func (l *Launcher) wait(ctx context.Context, id string, until container.WaitCond
 
 // remove removes this launch's containers only: a later Launch may already have replaced them.
 // The work-item volume stays until the session's next Launch or Stop.
-func (l *Launcher) remove(ctx context.Context, session ids.SessionID, byRole map[string]string) {
+func (l *Launcher) remove(ctx context.Context, session ids.SessionID, byRole map[role]string) {
 	for _, id := range byRole {
 		_, err := l.cli.ContainerRemove(ctx, id, client.ContainerRemoveOptions{Force: true})
 		if err != nil && !cerrdefs.IsNotFound(err) {

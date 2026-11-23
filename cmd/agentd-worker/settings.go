@@ -8,7 +8,7 @@ import (
 	"github.com/Elmanuel1/agentd-worker/internal/reap"
 )
 
-// seconds is a setting given in whole seconds.
+// seconds reads the *_SECONDS settings, given as whole numbers.
 type seconds time.Duration
 
 func (s *seconds) UnmarshalText(text []byte) error {

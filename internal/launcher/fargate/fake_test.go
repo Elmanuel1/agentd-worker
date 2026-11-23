@@ -16,16 +16,15 @@ import (
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
 )
 
-// fakeAWS is ECS, EFS and the EFS root in memory: a task runs as soon as it starts.
+// fakeAWS is ECS and EFS in memory: a task runs as soon as it starts.
 type fakeAWS struct {
-	mu      sync.Mutex
-	n       int
-	tasks   map[string]*ecstypes.Task
-	defs    map[string]string // ARN -> ACTIVE or INACTIVE
-	tags    map[string][]ecstypes.Tag
-	points  map[string]efstypes.AccessPointDescription
-	removed []string
-	runs    []*ecs.RunTaskInput
+	mu     sync.Mutex
+	n      int
+	tasks  map[string]*ecstypes.Task
+	defs   map[string]string // ARN -> ACTIVE or INACTIVE
+	tags   map[string][]ecstypes.Tag
+	points map[string]efstypes.AccessPointDescription
+	runs   []*ecs.RunTaskInput
 }
 
 func newFake() *fakeAWS {

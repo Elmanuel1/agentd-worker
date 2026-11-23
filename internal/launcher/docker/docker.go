@@ -69,17 +69,17 @@ func New(ctx context.Context, cli *client.Client, cfg Config, log *slog.Logger) 
 		cancel()
 		return nil, err
 	}
-	byRole := map[ids.SessionID]map[string]string{}
+	byRole := map[ids.SessionID]map[role]string{}
 	created, unfetched := map[ids.SessionID]bool{}, map[ids.SessionID]bool{}
 	for _, c := range containers {
 		s := ids.SessionID(c.Labels[labelSession])
 		if byRole[s] == nil {
-			byRole[s] = map[string]string{}
+			byRole[s] = map[role]string{}
 		}
-		role := c.Labels[labelRole]
-		byRole[s][role] = c.ID
-		created[s] = created[s] || (role == roleWorker && c.State == container.StateCreated)
-		unfetched[s] = unfetched[s] || (role == roleFetch && c.State == container.StateCreated)
+		r := roleOf(c)
+		byRole[s][r] = c.ID
+		created[s] = created[s] || (r == roleWorker && c.State == container.StateCreated)
+		unfetched[s] = unfetched[s] || (r == roleFetch && c.State == container.StateCreated)
 	}
 	// A sandbox whose fetch never started lost its nonce with the earlier launch, so it is
 	// removed. A worker not started yet waits on its fetch, as at launch; any other is watched
@@ -108,22 +108,25 @@ func (l *Launcher) Launch(ctx context.Context, session ids.SessionID, nonce ids.
 	if err := l.Stop(ctx, session); err != nil {
 		return err
 	}
-	for _, v := range []struct{ name, role string }{{workspaceVolume(session), roleWorkspace}, {runVolume(session), roleRun}} {
+	for _, v := range []struct {
+		name string
+		role role
+	}{{workspaceVolume(session), roleWorkspace}, {runVolume(session), roleRun}} {
 		if _, err := l.cli.VolumeCreate(ctx, client.VolumeCreateOptions{Name: v.name, Labels: labels(session, v.role)}); err != nil {
 			return fmt.Errorf("creating volume %s: %w", v.name, err)
 		}
 	}
-	created := map[string]string{}
+	created := map[role]string{}
 	for _, spec := range l.specs(session, nonce) {
 		res, err := l.cli.ContainerCreate(ctx, spec)
 		if err != nil {
 			return errors.Join(fmt.Errorf("creating %s: %w", spec.Name, err), l.Stop(context.WithoutCancel(ctx), session))
 		}
-		created[spec.Config.Labels[labelRole]] = res.ID
+		created[role(spec.Config.Labels[labelRole])] = res.ID
 	}
-	for _, role := range []string{roleSidecar, roleFetch} {
-		if _, err := l.cli.ContainerStart(ctx, created[role], client.ContainerStartOptions{}); err != nil {
-			return errors.Join(fmt.Errorf("starting %s: %w", role, err), l.Stop(context.WithoutCancel(ctx), session))
+	for _, r := range []role{roleSidecar, roleFetch} {
+		if _, err := l.cli.ContainerStart(ctx, created[r], client.ContainerStartOptions{}); err != nil {
+			return errors.Join(fmt.Errorf("starting %s: %w", r, err), l.Stop(context.WithoutCancel(ctx), session))
 		}
 	}
 	l.wg.Go(func() { l.startWorker(l.watch, session, created) })

@@ -45,9 +45,9 @@ func TestWorkItem(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			store := NewStore(c.loc)
+			store := NewStore()
 			collected := store.Open("sesn_1", "work_1", "n1", ids.NewSecret("the-secret"))
-			srv := NewServer(store, "env_1", "https://agentd.test", slog.New(slog.NewJSONHandler(io.Discard, nil)))
+			srv := NewServer(store, c.loc, "env_1", "https://agentd.test", slog.New(slog.NewJSONHandler(io.Discard, nil)))
 			req := httptest.NewRequest(c.method, "/work-item", nil)
 			req.Header.Set(NonceHeader, string(c.nonce))
 			rec := httptest.NewRecorder()
@@ -80,7 +80,7 @@ func TestWorkItem(t *testing.T) {
 }
 
 func TestDropAfterCollectionReportsCollected(t *testing.T) {
-	store := NewStore(locator{netip.MustParseAddr("192.0.2.1"), true, nil})
+	store := NewStore()
 	store.Open("sesn_1", "work_1", "n1", ids.NewSecret("s"))
 	if !store.Drop("sesn_1") {
 		t.Fatal("an uncollected item was not dropped")

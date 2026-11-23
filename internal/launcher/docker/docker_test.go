@@ -67,7 +67,7 @@ func TestSuite(t *testing.T) {
 		l := newLauncher(t, cfg)
 		count := func(ctx context.Context, s ids.SessionID) (int, error) {
 			cs, err := l.containers(ctx, s)
-			return len(slices.DeleteFunc(cs, func(c container.Summary) bool { return c.Labels[labelRole] != roleFetch })), err
+			return len(slices.DeleteFunc(cs, func(c container.Summary) bool { return roleOf(c) != roleFetch })), err
 		}
 		return l, count
 	})

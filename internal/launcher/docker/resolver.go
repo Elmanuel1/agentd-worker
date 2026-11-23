@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	roleResolver = "resolver"
+	roleResolver role = "resolver"
 	// runc is the engine's own runtime, under which the embedded resolver answers.
 	runc = "runc"
 )
@@ -58,10 +58,10 @@ func (l *Launcher) createResolver(ctx context.Context, name string) error {
 	_, err := l.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Name: name,
 		Config: &container.Config{
-			Image: l.cfg.ToolImage, Cmd: []string{roleResolver}, User: "65532:65532",
+			Image: l.cfg.ToolImage, Cmd: []string{string(roleResolver)}, User: "65532:65532",
 			// The Go runtime does not read the cgroup's limit; this keeps the heap under it.
 			Env:    []string{"GOMEMLIMIT=48MiB"},
-			Labels: map[string]string{labelRole: roleResolver},
+			Labels: map[string]string{labelRole: string(roleResolver)},
 		},
 		HostConfig: &container.HostConfig{
 			Runtime:        runc,

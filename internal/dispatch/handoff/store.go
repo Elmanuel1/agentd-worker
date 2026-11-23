@@ -3,10 +3,8 @@
 package handoff
 
 import (
-	"context"
 	"crypto/subtle"
 	"errors"
-	"net/netip"
 	"sync"
 
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
@@ -21,11 +19,6 @@ var (
 	ErrWrongSource = errors.New("request did not come from the sandbox")
 )
 
-// Locator finds a sandbox's address while it runs.
-type Locator interface {
-	Address(ctx context.Context, session ids.SessionID) (addr netip.Addr, running bool, err error)
-}
-
 type entry struct {
 	work      ids.WorkID
 	nonce     ids.Nonce
@@ -37,13 +30,12 @@ type entry struct {
 
 // Store is safe for concurrent use. It lives in memory only, so a restarted controller holds no nonces.
 type Store struct {
-	locator Locator
-	mu      sync.Mutex
-	open    map[ids.SessionID]*entry
+	mu   sync.Mutex
+	open map[ids.SessionID]*entry
 }
 
-func NewStore(locator Locator) *Store {
-	return &Store{locator: locator, open: map[ids.SessionID]*entry{}}
+func NewStore() *Store {
+	return &Store{open: map[ids.SessionID]*entry{}}
 }
 
 // Open holds secret for session under nonce, replacing an uncollected earlier one, and returns a

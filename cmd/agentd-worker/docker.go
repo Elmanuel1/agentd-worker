@@ -10,7 +10,7 @@ import (
 	"github.com/Elmanuel1/agentd-worker/internal/launcher/docker"
 )
 
-// DockerSettings are the Docker backend's own.
+// DockerSettings are read only when AGENTD_WORKER_LAUNCHER is docker.
 type DockerSettings struct {
 	Network  string `envconfig:"AGENTD_DOCKER_NETWORK" required:"true"`
 	Runtime  string `envconfig:"AGENTD_DOCKER_RUNTIME" default:"runsc"`

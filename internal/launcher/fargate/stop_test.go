@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"testing/synctest"
@@ -11,38 +13,33 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
 )
 
-// stuckDir fails its first directory removal.
-type stuckDir struct {
-	*fakeAWS
-	failed bool
-}
-
-func (f *stuckDir) RemoveAll(p string) error {
-	if !f.failed {
-		f.failed = true
-		return errors.New("device or resource busy")
-	}
-	return f.fakeAWS.RemoveAll(p)
-}
-
 // TestReleaseFinishesOnRetry holds FG-4 when a release fails part way: the session keeps its access
 // point, so List still finds it and the next release finishes.
 func TestReleaseFinishesOnRetry(t *testing.T) {
-	f := &stuckDir{fakeAWS: newFake()}
-	l := New(f, f, f, cfg)
+	f := newFake()
+	l := open(t, f, f, cfg)
 	if err := l.Launch(t.Context(), "sesn_1", "n1"); err != nil {
 		t.Fatal(err)
 	}
+	// A directory the controller cannot write keeps the session's own from being removed.
+	sessions := filepath.Join(l.cfg.RootMount, "sessions")
+	if err := os.MkdirAll(filepath.Join(sessions, "sesn_1"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	os.Chmod(sessions, 0o500)
+	t.Cleanup(func() { os.Chmod(sessions, 0o700) })
 	if err := l.Release(t.Context(), "sesn_1"); err == nil {
 		t.Fatal("a failed directory removal released the session")
 	}
 	if listed, err := l.List(t.Context()); err != nil || len(listed) != 1 {
 		t.Fatalf("after a failed release List gave %v, %v; want the session", listed, err)
 	}
+	os.Chmod(sessions, 0o700)
 	if err := l.Release(t.Context(), "sesn_1"); err != nil || len(f.points) != 0 || len(f.activeDefs()) != 0 {
 		t.Errorf("retried release: %v, points %v, defs %v", err, f.points, f.activeDefs())
 	}
@@ -58,7 +55,7 @@ type lagging struct {
 func (f *lagging) DescribeTasks(ctx context.Context, in *ecs.DescribeTasksInput, _ ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error) {
 	out, err := f.fakeAWS.DescribeTasks(ctx, in)
 	for i, t := range out.Tasks {
-		if arn := aws.ToString(t.TaskArn); aws.ToString(t.LastStatus) == "STOPPED" && !f.seen[arn] {
+		if arn := aws.ToString(t.TaskArn); aws.ToString(t.LastStatus) == string(ecstypes.DesiredStatusStopped) && !f.seen[arn] {
 			f.seen[arn] = true
 			out.Tasks[i].LastStatus = aws.String("DEACTIVATING")
 		}
@@ -72,7 +69,7 @@ func (f *lagging) DescribeTasks(ctx context.Context, in *ecs.DescribeTasksInput,
 func TestStopWaitsUntilStopped(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := &lagging{fakeAWS: newFake(), seen: map[string]bool{}}
-		l := New(f, f, f, cfg)
+		l := open(t, f, f, cfg)
 		for _, n := range []ids.Nonce{"n1", "n2"} {
 			if err := l.Launch(t.Context(), "sesn_1", n); err != nil {
 				t.Fatal(err)
@@ -89,7 +86,7 @@ func TestStopWaitsUntilStopped(t *testing.T) {
 			f.StopTask(t.Context(), &ecs.StopTaskInput{Task: aws.String(arn)})
 		}
 		start = time.Now()
-		if err := New(f, f, f, cfg).Stop(t.Context(), "sesn_1"); err != nil || time.Since(start) != 5*time.Second {
+		if err := open(t, f, f, cfg).Stop(t.Context(), "sesn_1"); err != nil || time.Since(start) != 5*time.Second {
 			t.Errorf("Stop after a restart: %v after %s, want it to wait for the task told to stop", err, time.Since(start))
 		}
 	})
@@ -128,7 +125,7 @@ func TestStopsATaskNotYetListed(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				f := &lagging{fakeAWS: newFake(), seen: map[string]bool{}}
-				l := New(c.ecs(f), f, f, cfg)
+				l := open(t, c.ecs(f), f, cfg)
 				if err := l.Launch(t.Context(), "sesn_1", "n1"); err != nil {
 					t.Fatal(err)
 				}

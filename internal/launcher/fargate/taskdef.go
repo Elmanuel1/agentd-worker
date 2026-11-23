@@ -1,6 +1,8 @@
 package fargate
 
 import (
+	"time"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	"github.com/aws/aws-sdk-go-v2/service/ecs/types"
@@ -8,6 +10,9 @@ import (
 	"github.com/Elmanuel1/agentd-worker/internal/fetch"
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
 )
+
+// startTimeout is the most Fargate lets a container wait for its dependency.
+const startTimeout = 120 * time.Second
 
 const (
 	containerFetch   = "fetch"
@@ -61,9 +66,9 @@ func (l *Launcher) taskDefinition(session ids.SessionID, accessPoint string) *ec
 					{ContainerName: aws.String(containerFetch), Condition: types.ContainerConditionSuccess},
 					{ContainerName: aws.String(containerSidecar), Condition: types.ContainerConditionStart},
 				},
-				// Fargate's limits for both: the handoff wait must end inside the 120 s start
-				// timeout, and ant gets 60 s after SIGTERM to post its result and stop its item.
-				StartTimeout:     aws.Int32(120),
+				// Fargate's limits for both: the handoff wait ends inside the start timeout
+				// (MaxHandoffWait), and ant gets 60 s after SIGTERM to post its result and stop its item.
+				StartTimeout:     aws.Int32(int32(startTimeout / time.Second)),
 				StopTimeout:      aws.Int32(60),
 				MountPoints:      []types.MountPoint{workspace, run},
 				LogConfiguration: l.logs(containerWorker),

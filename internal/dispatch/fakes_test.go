@@ -175,8 +175,8 @@ func newMeteredRig(t *testing.T, cfg Config, sessions fakeSessions, meter metric
 	t.Helper()
 	r := &rig{queue: &fakeQueue{items: make(chan item, 10)}, backend: newBackend()}
 	log := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	r.store = handoff.NewStore(r.backend)
-	r.server = handoff.NewServer(r.store, "env_1", "https://agentd.test", log).Handler()
+	r.store = handoff.NewStore()
+	r.server = handoff.NewServer(r.store, r.backend, "env_1", "https://agentd.test", log).Handler()
 	ctrl, err := New(cfg, r.queue, sessions, r.backend, r.backend, r.store, meter, log)
 	if err != nil {
 		t.Fatal(err)

@@ -6,6 +6,7 @@ package fargate
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -45,11 +46,6 @@ type EFS interface {
 	DeleteAccessPoint(context.Context, *efs.DeleteAccessPointInput, ...func(*efs.Options)) (*efs.DeleteAccessPointOutput, error)
 }
 
-// Dirs removes a session's directory through the file system's root, mounted in the controller.
-type Dirs interface {
-	RemoveAll(path string) error
-}
-
 // Config holds the adapter's settings.
 type Config struct {
 	Cluster                 string
@@ -57,6 +53,8 @@ type Config struct {
 	FileSystemID            string
 	// RootMount is where the controller mounts the file system's root.
 	RootMount string
+	// WorkerUID and WorkerGID own each session's directory: the sandbox image's worker user.
+	WorkerUID, WorkerGID int64
 	// TaskRoleARN names a role with no permission; ExecutionRoleARN pulls images and writes logs.
 	ExecutionRoleARN, TaskRoleARN string
 	SandboxImage, ToolImage       string
@@ -68,9 +66,11 @@ type Config struct {
 
 // Launcher runs sandboxes as Fargate tasks.
 type Launcher struct {
-	ecs  ECS
-	efs  EFS
-	dirs Dirs
+	ecs ECS
+	efs EFS
+	// root is the file system's root, through which Release removes a session's directory; an
+	// os.Root keeps the removal inside it.
+	root *os.Root
 	cfg  Config
 	mu   sync.Mutex
 	// tasks holds the task each Launch ran, so Address reads it with one DescribeTasks call;
@@ -78,13 +78,28 @@ type Launcher struct {
 	tasks map[ids.SessionID]string
 }
 
-func New(ecsClient ECS, efsClient EFS, dirs Dirs, cfg Config) *Launcher {
-	return &Launcher{ecs: ecsClient, efs: efsClient, dirs: dirs, cfg: cfg, tasks: map[ids.SessionID]string{}}
+// MaxHandoffWait keeps the handoff wait inside the start timeout a Fargate container waits for its
+// dependency, with room for the image pull.
+const MaxHandoffWait = startTimeout - 10*time.Second
+
+// New refuses a handoff wait Fargate cannot keep, and opens the file system's root.
+func New(ecsClient ECS, efsClient EFS, cfg Config) (*Launcher, error) {
+	if cfg.HandoffWait <= 0 || cfg.HandoffWait > MaxHandoffWait {
+		return nil, fmt.Errorf("the handoff wait is %s; on Fargate it must be above 0 and at most %s", cfg.HandoffWait, MaxHandoffWait)
+	}
+	root, err := os.OpenRoot(cfg.RootMount)
+	if err != nil {
+		return nil, fmt.Errorf("opening the file system's root: %w", err)
+	}
+	return &Launcher{ecs: ecsClient, efs: efsClient, root: root, cfg: cfg, tasks: map[ids.SessionID]string{}}, nil
 }
+
+func (l *Launcher) Close() { l.root.Close() }
 
 func family(s ids.SessionID) string { return "agentd-sandbox-" + string(s) }
 
-func sessionDir(s ids.SessionID) string { return "/sessions/" + string(s) }
+// sessionDir is the session's directory under the file system's root.
+func sessionDir(s ids.SessionID) string { return "sessions/" + string(s) }
 
 // Launch stops the session's earlier tasks, makes its access point and family revision when it has
 // none or its config changed, then runs that revision with the nonce in the fetch container's

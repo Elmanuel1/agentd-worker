@@ -77,7 +77,7 @@ func runScale(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 	client := agentd.New(s.BaseURL, s.EnvironmentID, s.Key.Reveal(), requestTimeout).WithWorker(host)
-	store := handoff.NewStore(be)
+	store := handoff.NewStore()
 	ctrl, err := dispatch.New(cfg, client, client, be, be, store, meter, log)
 	if err != nil {
 		return err
@@ -86,7 +86,7 @@ func runScale(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	server := handoff.NewServer(store, s.EnvironmentID, sandboxBaseURL, log)
+	server := handoff.NewServer(store, be, s.EnvironmentID, sandboxBaseURL, log)
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return handoff.Serve(ctx, s.HandoffAddr, cert, server.Handler()) })
 	g.Go(func() error { return ctrl.Run(ctx) })

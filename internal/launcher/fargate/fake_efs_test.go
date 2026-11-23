@@ -8,7 +8,7 @@ import (
 	efstypes "github.com/aws/aws-sdk-go-v2/service/efs/types"
 )
 
-// The fake's EFS and the EFS root the controller mounts.
+// The fake's EFS.
 
 func (f *fakeAWS) CreateAccessPoint(_ context.Context, in *efs.CreateAccessPointInput, _ ...func(*efs.Options)) (*efs.CreateAccessPointOutput, error) {
 	f.mu.Lock()
@@ -39,11 +39,4 @@ func (f *fakeAWS) DeleteAccessPoint(_ context.Context, in *efs.DeleteAccessPoint
 	defer f.mu.Unlock()
 	delete(f.points, aws.ToString(in.AccessPointId))
 	return &efs.DeleteAccessPointOutput{}, nil
-}
-
-func (f *fakeAWS) RemoveAll(p string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.removed = append(f.removed, p)
-	return nil
 }

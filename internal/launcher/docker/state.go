@@ -20,7 +20,7 @@ func (l *Launcher) List(ctx context.Context) ([]dispatch.Sandbox, error) {
 	if err != nil {
 		return nil, err
 	}
-	vols, err := l.cli.VolumeList(ctx, client.VolumeListOptions{Filters: make(client.Filters).Add("label", labelRole+"="+roleWorkspace)})
+	vols, err := l.cli.VolumeList(ctx, client.VolumeListOptions{Filters: make(client.Filters).Add("label", labelRole+"="+string(roleWorkspace))})
 	if err != nil {
 		return nil, fmt.Errorf("listing volumes: %w", err)
 	}
@@ -48,9 +48,9 @@ func (l *Launcher) Address(ctx context.Context, session ids.SessionID) (netip.Ad
 	if err != nil {
 		return netip.Addr{}, false, err
 	}
-	for _, role := range []string{roleFetch, roleWorker} {
+	for _, r := range []role{roleFetch, roleWorker} {
 		for _, c := range containers {
-			if c.Labels[labelRole] != role || !runs(c) || c.NetworkSettings == nil {
+			if roleOf(c) != r || !runs(c) || c.NetworkSettings == nil {
 				continue
 			}
 			if ep := c.NetworkSettings.Networks[l.cfg.Network]; ep != nil && ep.IPAddress.IsValid() {
@@ -61,10 +61,6 @@ func (l *Launcher) Address(ctx context.Context, session ids.SessionID) (netip.Ad
 	return netip.Addr{}, false, nil
 }
 
-// workerGrace is the seconds a worker gets after SIGTERM, as Anthropic's operations page advises
-// (--stop-timeout 60): ant posts its error result and stops its item before it exits.
-const workerGrace = 60
-
 // Stop stops the worker with SIGTERM, then the sidecar, then removes the session's containers and
 // the volume that held its work item, keeping /workspace.
 func (l *Launcher) Stop(ctx context.Context, session ids.SessionID) error {
@@ -73,15 +69,15 @@ func (l *Launcher) Stop(ctx context.Context, session ids.SessionID) error {
 		return err
 	}
 	var errs []error
-	for _, role := range []string{roleWorker, roleSidecar} {
-		grace := map[string]int{roleWorker: workerGrace, roleSidecar: sidecarGrace}[role]
+	for _, r := range []role{roleWorker, roleSidecar} {
+		grace := r.grace()
 		for _, c := range containers {
-			if c.Labels[labelRole] != role || c.State != container.StateRunning {
+			if roleOf(c) != r || c.State != container.StateRunning {
 				continue
 			}
 			_, err := l.cli.ContainerStop(ctx, c.ID, client.ContainerStopOptions{Timeout: &grace})
 			if err != nil && !cerrdefs.IsNotFound(err) {
-				errs = append(errs, fmt.Errorf("stopping %s: %w", role, err))
+				errs = append(errs, fmt.Errorf("stopping %s: %w", r, err))
 			}
 		}
 	}
@@ -130,5 +126,5 @@ func (l *Launcher) containers(ctx context.Context, session ids.SessionID) ([]con
 }
 
 func runs(c container.Summary) bool {
-	return c.State == container.StateRunning && (c.Labels[labelRole] == roleFetch || c.Labels[labelRole] == roleWorker)
+	return c.State == container.StateRunning && roleOf(c).addressable()
 }
