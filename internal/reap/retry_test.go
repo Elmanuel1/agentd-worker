@@ -49,27 +49,33 @@ func TestFailedCallIsRetried(t *testing.T) {
 	})
 }
 
-// TestUntimedStopIsAnsweredByTheListedTime holds RP-1 when agentd answers a stop with no time: the
-// pass answers nothing and retries, the next answers by the stop time agentd lists, and an item
-// it lists with no time is retried again; no cutoff is ever this clock's.
+// TestUntimedStopIsAnsweredByTheListedTime holds RP-1 when agentd gives a stopped item no time,
+// on the stop's answer or in its list: the pass answers nothing and retries, the next answers by
+// the stop time agentd lists, however long ago, and one still listed with no time is retried
+// again; no cutoff is ever this clock's.
 func TestUntimedStopIsAnsweredByTheListedTime(t *testing.T) {
 	now := time.Now()
+	stale := Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}
+	untimed := Item{Work: "w", Session: "s", State: StateStopped}
 	cases := []struct {
 		name   string
+		first  Item
+		calls  []string
 		listed time.Time
 		want   []string
 	}{
-		{"the listed time", now.Add(-30 * time.Second), []string{"send s [dead]"}},
-		{"no listed time", time.Time{}, nil},
+		{"a stop answered with no time, then listed", stale, []string{"stop w"}, now.Add(-30 * time.Second), []string{"send s [dead]"}},
+		{"a stop answered with no time, listed with none", stale, []string{"stop w"}, time.Time{}, nil},
+		{"a stopped item first listed with no time, then long ago", untimed, nil, now.Add(-10 * time.Minute), []string{"send s [dead]"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			log := []Event{{Type: ToolUse, ID: "dead", At: now.Add(-time.Minute)}, {Type: ToolUse, ID: "live", At: now.Add(-10 * time.Second)}}
-			f := &fakeAgentd{items: []Item{{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}}, events: map[ids.SessionID][]Event{"s": log}, untimed: true}
+			log := []Event{{Type: ToolUse, ID: "dead", At: now.Add(-time.Hour)}, {Type: ToolUse, ID: "live", At: now.Add(-10 * time.Second)}}
+			f := &fakeAgentd{items: []Item{c.first}, events: map[ids.SessionID][]Event{"s": log}, untimed: true}
 			r := newReaper(t, f)
 			r.passAt(t.Context(), now)
-			if want := []string{"stop w"}; !slices.Equal(f.calls, want) {
-				t.Fatalf("first pass %v, want %v", f.calls, want)
+			if !slices.Equal(f.calls, c.calls) || !r.retry["s"] {
+				t.Fatalf("first pass %v, retry %v; want %v and a retry", f.calls, r.retry["s"], c.calls)
 			}
 			f.items, f.calls = []Item{{Work: "w", Session: "s", State: StateStopped, StoppedAt: c.listed}}, nil
 			r.passAt(t.Context(), now.Add(time.Minute))

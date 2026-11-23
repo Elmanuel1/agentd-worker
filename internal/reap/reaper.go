@@ -102,8 +102,9 @@ func (r *Reaper) reap(ctx context.Context, now time.Time, it Item) {
 		}
 		r.reaped.Add(ctx, 1)
 		stopped = s
-	// agentd's clock stamps StoppedAt; an interval of overlap absorbs its lag behind this one.
-	case it.State == StateStopped && (it.StoppedAt.After(r.lastPass.Add(-r.cfg.Interval)) || r.retry[it.Session]):
+	// agentd's clock stamps StoppedAt; an interval of overlap absorbs its lag behind this one. One
+	// listed with no time fails its answer, and so is retried until agentd lists one.
+	case it.State == StateStopped && (it.StoppedAt.IsZero() || it.StoppedAt.After(r.lastPass.Add(-r.cfg.Interval)) || r.retry[it.Session]):
 		stopped = Stopped{item: it}
 	default:
 		return
