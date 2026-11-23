@@ -100,17 +100,32 @@ func TestLaunchAndRelease(t *testing.T) {
 	}
 }
 
-// TestRelaunchUnderAStoppedNonce holds that a repeated Launch whose task has stopped fails, since
-// ECS would only replay that task.
-func TestRelaunchUnderAStoppedNonce(t *testing.T) {
-	f := newFake()
-	l := open(t, f, f, cfg)
-	if err := l.Launch(t.Context(), "sesn_1", "n1"); err != nil {
-		t.Fatal(err)
+// TestRelaunchUnderOneNonce holds FG-1's repeated Launch: it keeps a task ECS does not return yet,
+// as Stop does, and fails when the nonce's task stopped, since ECS would only replay it.
+func TestRelaunchUnderOneNonce(t *testing.T) {
+	cases := []struct {
+		name    string
+		ecs     func(*fakeAWS) ECS
+		stopped bool
+		failed  bool
+	}{
+		{"a task ECS does not return yet is this launch", func(f *fakeAWS) ECS { return &hidden{unlisted{&lagging{fakeAWS: f, seen: map[string]bool{}}}, -1} }, false, false},
+		{"a stopped task cannot run again", func(f *fakeAWS) ECS { return f }, true, true},
 	}
-	f.StopTask(t.Context(), &ecs.StopTaskInput{Task: aws.String(l.tasks["sesn_1"].arn)})
-	if err := l.Launch(t.Context(), "sesn_1", "n1"); err == nil {
-		t.Error("a launch under a nonce whose task stopped reported a sandbox")
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFake()
+			l := open(t, c.ecs(f), f, cfg)
+			if err := l.Launch(t.Context(), "sesn_1", "n1"); err != nil {
+				t.Fatal(err)
+			}
+			if c.stopped {
+				f.StopTask(t.Context(), &ecs.StopTaskInput{Task: aws.String(l.tasks["sesn_1"].arn)})
+			}
+			if err := l.Launch(t.Context(), "sesn_1", "n1"); (err != nil) != c.failed {
+				t.Errorf("repeated launch: %v", err)
+			}
+		})
 	}
 }
 

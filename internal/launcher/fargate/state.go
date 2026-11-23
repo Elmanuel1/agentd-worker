@@ -150,7 +150,7 @@ func (l *Launcher) Stop(ctx context.Context, session ids.SessionID) error {
 		if err != nil {
 			return err
 		}
-		missing := known.arn != "" && time.Since(known.at) < taskRetention &&
+		missing := known.arn != "" && known.settling() &&
 			!slices.ContainsFunc(tasks, func(t ecstypes.Task) bool { return aws.ToString(t.TaskArn) == known.arn })
 		if !missing && !slices.ContainsFunc(append(tasks, told...), func(t ecstypes.Task) bool { return aws.ToString(t.LastStatus) != lastStopped }) {
 			break

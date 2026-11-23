@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"context"
 	"sync"
 
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
@@ -11,43 +12,44 @@ import (
 type gate struct {
 	mu       sync.Mutex
 	stopping map[ids.SessionID]int
-	// starting closes when the session's worker has started, or failed to.
-	starting map[ids.SessionID]chan struct{}
+	// starting holds a channel per start under way, closed once that start has run.
+	starting map[ids.SessionID]map[chan struct{}]bool
 }
 
 func newGate() *gate {
-	return &gate{stopping: map[ids.SessionID]int{}, starting: map[ids.SessionID]chan struct{}{}}
+	return &gate{stopping: map[ids.SessionID]int{}, starting: map[ids.SessionID]map[chan struct{}]bool{}}
 }
 
-// start reports whether the session's worker may start; when it may, the caller calls started.
-func (g *gate) start(session ids.SessionID) bool {
+// start reports whether the session's worker may start and, when it may, the func to call once
+// the start has run.
+func (g *gate) start(session ids.SessionID) (func(), bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.stopping[session] > 0 {
-		return false
+		return nil, false
 	}
-	g.starting[session] = make(chan struct{})
-	return true
+	ch := make(chan struct{})
+	if g.starting[session] == nil {
+		g.starting[session] = map[chan struct{}]bool{}
+	}
+	g.starting[session][ch] = true
+	return func() {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		delete(g.starting[session], ch)
+		if len(g.starting[session]) == 0 {
+			delete(g.starting, session)
+		}
+		close(ch)
+	}, true
 }
 
-func (g *gate) started(session ids.SessionID) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	close(g.starting[session])
-	delete(g.starting, session)
-}
-
-// stop waits out a start under way and holds starts off until the func it returns runs.
-func (g *gate) stop(session ids.SessionID) func() {
+// stop waits out the session's starts under way, until ctx ends, and holds starts off until the
+// func it returns runs.
+func (g *gate) stop(ctx context.Context, session ids.SessionID) (func(), error) {
 	g.mu.Lock()
 	g.stopping[session]++
-	for ch := g.starting[session]; ch != nil; ch = g.starting[session] {
-		g.mu.Unlock()
-		<-ch
-		g.mu.Lock()
-	}
-	g.mu.Unlock()
-	return func() {
+	release := func() {
 		g.mu.Lock()
 		defer g.mu.Unlock()
 		g.stopping[session]--
@@ -55,4 +57,20 @@ func (g *gate) stop(session ids.SessionID) func() {
 			delete(g.stopping, session)
 		}
 	}
+	for len(g.starting[session]) > 0 {
+		var ch chan struct{}
+		for ch = range g.starting[session] {
+			break
+		}
+		g.mu.Unlock()
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			release()
+			return nil, ctx.Err()
+		}
+		g.mu.Lock()
+	}
+	g.mu.Unlock()
+	return release, nil
 }

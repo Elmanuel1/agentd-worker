@@ -86,6 +86,10 @@ type launched struct {
 	nonce ids.Nonce
 }
 
+// settling reports whether ECS may not return the task yet: it launched within ECS's retention,
+// so not returning it is lag, not a task gone.
+func (k launched) settling() bool { return time.Since(k.at) < taskRetention }
+
 // MaxHandoffWait keeps the handoff wait inside the start timeout a Fargate container waits for its
 // dependency, with room for the image pull.
 const MaxHandoffWait = startTimeout - 10*time.Second
@@ -120,9 +124,10 @@ func (l *Launcher) Launch(ctx context.Context, session ids.SessionID, nonce ids.
 	l.mu.Unlock()
 	if known.arn != "" && known.nonce == nonce {
 		tasks, err := l.describeTasks(ctx, []string{known.arn})
-		if err != nil || slices.ContainsFunc(tasks, func(t ecstypes.Task) bool {
+		running := slices.ContainsFunc(tasks, func(t ecstypes.Task) bool {
 			return aws.ToString(t.DesiredStatus) == string(ecstypes.DesiredStatusRunning)
-		}) {
+		})
+		if err != nil || running || (len(tasks) == 0 && known.settling()) {
 			return err
 		}
 		return fmt.Errorf("launching session %s: its nonce already ran a task, which stopped", session)

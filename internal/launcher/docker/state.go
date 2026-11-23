@@ -64,7 +64,11 @@ func (l *Launcher) Address(ctx context.Context, session ids.SessionID) (netip.Ad
 // Stop stops the worker with SIGTERM, then the sidecar, then removes the session's containers and
 // the volume that held its work item, keeping /workspace.
 func (l *Launcher) Stop(ctx context.Context, session ids.SessionID) error {
-	defer l.gate.stop(session)()
+	release, err := l.gate.stop(ctx, session)
+	if err != nil {
+		return err
+	}
+	defer release()
 	containers, err := l.containers(ctx, session)
 	if err != nil {
 		return err

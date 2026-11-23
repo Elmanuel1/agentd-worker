@@ -24,11 +24,12 @@ func (l *Launcher) startWorker(ctx context.Context, session ids.SessionID, byRol
 		return
 	}
 	// A Stop under way removes the sandbox itself.
-	if !l.gate.start(session) {
+	started, ok := l.gate.start(session)
+	if !ok {
 		return
 	}
 	_, err = l.cli.ContainerStart(ctx, byRole[roleWorker], client.ContainerStartOptions{})
-	l.gate.started(session)
+	started()
 	if err != nil {
 		l.log.Warn("starting the worker failed", "session_id", session, "error", err)
 		l.remove(ctx, session, byRole)
