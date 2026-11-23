@@ -34,12 +34,7 @@ func runScale(ctx context.Context, log *slog.Logger) error {
 	envID := ids.EnvironmentID(e.required("ANTHROPIC_ENVIRONMENT_ID"))
 	key := ids.NewSecret(e.required("ANTHROPIC_ENVIRONMENT_KEY"))
 	launcher := e.str("AGENTD_WORKER_LAUNCHER", "docker")
-	cfg := dispatch.Config{
-		HandoffWait:     e.seconds("AGENTD_HANDOFF_WAIT_SECONDS", defaultHandoffWait(launcher)),
-		MaxSandboxes:    e.number("AGENTD_MAX_SANDBOXES", 100, 1),
-		ReleaseInterval: e.seconds("AGENTD_RELEASE_INTERVAL_SECONDS", 600),
-		Retention:       time.Duration(e.number("AGENTD_RETENTION_DAYS", 0, 0)) * 24 * time.Hour,
-	}
+	cfg := dispatchConfig(&e, launcher)
 	reapCfg := reapConfig(&e)
 	addr := e.str("AGENTD_HANDOFF_ADDR", ":8443")
 	cert, certErr := tls.X509KeyPair([]byte(e.required("AGENTD_HANDOFF_CERT")), []byte(e.required("AGENTD_HANDOFF_KEY")))
@@ -88,6 +83,21 @@ func runScale(ctx context.Context, log *slog.Logger) error {
 	g.Go(func() error { return reaper.Run(ctx) })
 	log.Info("controller started", "environment_id", envID, "launcher", launcher)
 	return g.Wait()
+}
+
+// dispatchConfig reads the controller's settings. The handoff wait defaults to 120 s, and on
+// Fargate to the most its start timeout leaves room for.
+func dispatchConfig(e *env, launcher string) dispatch.Config {
+	wait := 120
+	if launcher == "fargate" {
+		wait = int(fargateMaxWait / time.Second)
+	}
+	return dispatch.Config{
+		HandoffWait:     e.seconds("AGENTD_HANDOFF_WAIT_SECONDS", wait),
+		MaxSandboxes:    e.number("AGENTD_MAX_SANDBOXES", 100, 1),
+		ReleaseInterval: e.seconds("AGENTD_RELEASE_INTERVAL_SECONDS", 600),
+		Retention:       time.Duration(e.number("AGENTD_RETENTION_DAYS", 0, 0)) * 24 * time.Hour,
+	}
 }
 
 func reapConfig(e *env) reap.Config {

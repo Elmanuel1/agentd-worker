@@ -7,6 +7,10 @@ variable "name" {
   description = "Prefix of every resource."
   type        = string
   default     = "agentd-worker"
+  validation {
+    condition     = !startswith("${var.name}-", "agentd-sandbox-")
+    error_message = "agentd-sandbox-* names the sandboxes' task-definition families, which the controller may delete."
+  }
 }
 
 variable "vpc_id" {

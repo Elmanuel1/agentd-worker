@@ -42,7 +42,7 @@ The S3 gateway endpoint's route tables must cover the private subnets, or image 
 ## Sessions
 
 Each session gets an EFS access point at `/sessions/<session id>`, created with the session id as
-its client token, and a task-definition family `agentd-<session id>` that mounts it. The task runs
+its client token, and a task-definition family `agentd-sandbox-<session id>` that mounts it. The task runs
 fetch, then the worker once fetch succeeds, and a sidecar, on ARM64, with a task role that holds no
 permission. When the session is deleted or archived, or idle past `retention_days`, the
 controller deletes its access point, its directory and its family. The workspace mounts with the

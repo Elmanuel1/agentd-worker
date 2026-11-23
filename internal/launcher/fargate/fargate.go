@@ -81,7 +81,7 @@ func New(ecsClient ECS, efsClient EFS, dirs Dirs, cfg Config) *Launcher {
 	return &Launcher{ecs: ecsClient, efs: efsClient, dirs: dirs, cfg: cfg, tasks: map[ids.SessionID]string{}}
 }
 
-func family(s ids.SessionID) string { return "agentd-" + string(s) }
+func family(s ids.SessionID) string { return "agentd-sandbox-" + string(s) }
 
 func sessionDir(s ids.SessionID) string { return "/sessions/" + string(s) }
 

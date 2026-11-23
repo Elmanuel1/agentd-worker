@@ -3,8 +3,6 @@ package dispatch
 import (
 	"context"
 	"time"
-
-	"github.com/Elmanuel1/agentd-worker/internal/ids"
 )
 
 // Release releases, every ReleaseInterval until ctx ends, the sandboxes and storage of sessions that
@@ -47,7 +45,15 @@ func (c *Controller) release(ctx context.Context, sb Sandbox) {
 	}
 	// An idle session keeps its storage while its sandbox runs, and one may have launched since
 	// the list, so its sandbox is looked up again.
-	if !state.Over(true, now, c.cfg.Retention) && c.running(ctx, sb.Session) {
+	running := false
+	if !state.Over(true, now, c.cfg.Retention) {
+		_, running, err = c.locator.Address(ctx, sb.Session)
+	}
+	if err != nil {
+		c.log.Warn("finding the session's sandbox failed; keeping it", "session_id", sb.Session, "error", err)
+		return
+	}
+	if running {
 		return
 	}
 	if err := c.launcher.Release(ctx, sb.Session); err != nil {
@@ -56,14 +62,4 @@ func (c *Controller) release(ctx context.Context, sb Sandbox) {
 	}
 	c.metrics.releases.Add(ctx, 1)
 	c.log.Info("released the sandbox of an ended session", "session_id", sb.Session, "gone", state.Gone, "terminated", state.Terminated)
-}
-
-// running reports whether the session's sandbox runs, and true when that cannot be read.
-func (c *Controller) running(ctx context.Context, session ids.SessionID) bool {
-	_, running, err := c.locator.Address(ctx, session)
-	if err != nil {
-		c.log.Warn("finding the session's sandbox failed; keeping it", "session_id", session, "error", err)
-		return true
-	}
-	return running
 }

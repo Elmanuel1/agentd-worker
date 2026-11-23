@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"path"
 	"slices"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
@@ -82,41 +83,48 @@ func addressOf(tasks []ecstypes.Task, err error) (netip.Addr, bool, error) {
 	return netip.Addr{}, running, err
 }
 
-// Stop stops the session's tasks and returns once they have, so no later task shares the
-// workspace with one still shutting down. The task a Launch ran stays known until then, so a
-// retry after an interrupted wait waits for it too.
+// stopWait bounds the wait for stopped tasks: the worker's 60 s after SIGTERM, the sidecar's 30 s
+// after it, and room for ECS to deprovision.
+const stopWait = 3 * time.Minute
+
+// Stop stops the session's tasks and returns once every task of its family has stopped, so no
+// later task shares the workspace with one still shutting down, one told to stop before a
+// controller restart included. The SDK's waiter is not used: it waits out its timeout on a task ECS
+// no longer returns.
 func (l *Launcher) Stop(ctx context.Context, session ids.SessionID) error {
 	l.mu.Lock()
-	known := l.tasks[session]
+	delete(l.tasks, session)
 	l.mu.Unlock()
 	tasks, err := l.listTasks(ctx, session)
 	if err != nil {
 		return err
 	}
-	var arns []string
-	if known != "" {
-		arns = append(arns, known)
-	}
 	var errs []error
 	for _, t := range tasks {
 		_, err := l.ecs.StopTask(ctx, &ecs.StopTaskInput{Cluster: aws.String(l.cfg.Cluster), Task: t.TaskArn, Reason: aws.String("agentd-worker stopped the sandbox")})
 		errs = append(errs, err)
-		if arn := aws.ToString(t.TaskArn); arn != known {
-			arns = append(arns, arn)
-		}
 	}
 	if err := errors.Join(errs...); err != nil {
 		return err
 	}
-	if err := l.waitStopped(ctx, arns); err != nil {
-		return err
+	ctx, cancel := context.WithTimeout(ctx, stopWait)
+	defer cancel()
+	// startedBy must be ListTasks' only filter, so tasks told to stop are found by their family.
+	stopping := &ecs.ListTasksInput{Cluster: aws.String(l.cfg.Cluster), Family: aws.String(family(session)), DesiredStatus: ecstypes.DesiredStatusStopped}
+	for {
+		tasks, err := l.tasksOf(ctx, stopping)
+		if err != nil {
+			return err
+		}
+		if !slices.ContainsFunc(tasks, func(t ecstypes.Task) bool { return aws.ToString(t.LastStatus) != "STOPPED" }) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for the session's tasks to stop: %w", ctx.Err())
+		case <-time.After(5 * time.Second):
+		}
 	}
-	l.mu.Lock()
-	if l.tasks[session] == known {
-		delete(l.tasks, session)
-	}
-	l.mu.Unlock()
-	return nil
 }
 
 // Release stops the session's tasks and deletes its directory, its family and its access point.

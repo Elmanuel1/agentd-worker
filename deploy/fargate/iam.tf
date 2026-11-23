@@ -96,7 +96,7 @@ data "aws_iam_policy_document" "controller" {
   statement {
     sid       = "Tasks"
     actions   = ["ecs:RunTask", "ecs:StopTask", "ecs:DescribeTasks"]
-    resources = ["arn:aws:ecs:${local.region}:${local.account}:task-definition/agentd-*", "arn:aws:ecs:${local.region}:${local.account}:task/${aws_ecs_cluster.this.name}/*"]
+    resources = ["arn:aws:ecs:${local.region}:${local.account}:task-definition/agentd-sandbox-*", "arn:aws:ecs:${local.region}:${local.account}:task/${aws_ecs_cluster.this.name}/*"]
     condition {
       test     = "ArnEquals"
       variable = "ecs:cluster"
@@ -112,13 +112,13 @@ data "aws_iam_policy_document" "controller" {
   statement {
     sid       = "DeleteRevisions"
     actions   = ["ecs:DeleteTaskDefinitions"]
-    resources = ["arn:aws:ecs:${local.region}:${local.account}:task-definition/agentd-*"]
+    resources = ["arn:aws:ecs:${local.region}:${local.account}:task-definition/agentd-sandbox-*"]
   }
   # Tags on RegisterTaskDefinition are authorised as ecs:TagResource.
   statement {
     sid       = "TagRevisions"
     actions   = ["ecs:TagResource"]
-    resources = ["arn:aws:ecs:${local.region}:${local.account}:task-definition/agentd-*"]
+    resources = ["arn:aws:ecs:${local.region}:${local.account}:task-definition/agentd-sandbox-*"]
     condition {
       test     = "StringEquals"
       variable = "ecs:CreateAction"

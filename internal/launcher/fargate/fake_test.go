@@ -11,7 +11,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
-	"github.com/aws/aws-sdk-go-v2/service/efs"
 	efstypes "github.com/aws/aws-sdk-go-v2/service/efs/types"
 
 	"github.com/Elmanuel1/agentd-worker/internal/ids"
@@ -38,7 +37,7 @@ func (f *fakeAWS) RunTask(_ context.Context, in *ecs.RunTaskInput, _ ...func(*ec
 	defer f.mu.Unlock()
 	f.n++
 	arn := fmt.Sprintf("arn:aws:ecs:r:1:task/c/%d", f.n)
-	f.tasks[arn] = &ecstypes.Task{TaskArn: aws.String(arn), StartedBy: in.StartedBy, LastStatus: aws.String("RUNNING"), DesiredStatus: aws.String("RUNNING"),
+	f.tasks[arn] = &ecstypes.Task{TaskArn: aws.String(arn), TaskDefinitionArn: in.TaskDefinition, StartedBy: in.StartedBy, LastStatus: aws.String("RUNNING"), DesiredStatus: aws.String("RUNNING"),
 		Attachments: []ecstypes.Attachment{{Details: []ecstypes.KeyValuePair{{Name: aws.String("privateIPv4Address"), Value: aws.String(fmt.Sprintf("10.0.0.%d", f.n))}}}}}
 	f.runs = append(f.runs, in)
 	return &ecs.RunTaskOutput{Tasks: []ecstypes.Task{*f.tasks[arn]}}, nil
@@ -64,7 +63,8 @@ func (f *fakeAWS) ListTasks(_ context.Context, in *ecs.ListTasksInput, _ ...func
 	}
 	var arns []string
 	for arn, t := range f.tasks {
-		if aws.ToString(t.DesiredStatus) == string(in.DesiredStatus) && (in.StartedBy == nil || aws.ToString(in.StartedBy) == aws.ToString(t.StartedBy)) {
+		family := in.Family == nil || strings.Contains(aws.ToString(t.TaskDefinitionArn), "/"+aws.ToString(in.Family)+":")
+		if aws.ToString(t.DesiredStatus) == string(in.DesiredStatus) && family && (in.StartedBy == nil || aws.ToString(in.StartedBy) == aws.ToString(t.StartedBy)) {
 			arns = append(arns, arn)
 		}
 	}
@@ -137,44 +137,6 @@ func (f *fakeAWS) DeleteTaskDefinitions(_ context.Context, in *ecs.DeleteTaskDef
 		delete(f.defs, arn)
 	}
 	return &ecs.DeleteTaskDefinitionsOutput{}, nil
-}
-
-func (f *fakeAWS) CreateAccessPoint(_ context.Context, in *efs.CreateAccessPointInput, _ ...func(*efs.Options)) (*efs.CreateAccessPointOutput, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	id := "fsap-" + aws.ToString(in.ClientToken)
-	if _, ok := f.points[id]; ok {
-		return nil, &efstypes.AccessPointAlreadyExists{AccessPointId: aws.String(id)}
-	}
-	f.points[id] = efstypes.AccessPointDescription{AccessPointId: aws.String(id), Tags: in.Tags, RootDirectory: in.RootDirectory}
-	return &efs.CreateAccessPointOutput{AccessPointId: aws.String(id)}, nil
-}
-
-func (f *fakeAWS) DescribeAccessPoints(_ context.Context, in *efs.DescribeAccessPointsInput, _ ...func(*efs.Options)) (*efs.DescribeAccessPointsOutput, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := &efs.DescribeAccessPointsOutput{}
-	for id, ap := range f.points {
-		if in.AccessPointId == nil || aws.ToString(in.AccessPointId) == id {
-			ap.LifeCycleState = efstypes.LifeCycleStateAvailable
-			out.AccessPoints = append(out.AccessPoints, ap)
-		}
-	}
-	return out, nil
-}
-
-func (f *fakeAWS) DeleteAccessPoint(_ context.Context, in *efs.DeleteAccessPointInput, _ ...func(*efs.Options)) (*efs.DeleteAccessPointOutput, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	delete(f.points, aws.ToString(in.AccessPointId))
-	return &efs.DeleteAccessPointOutput{}, nil
-}
-
-func (f *fakeAWS) RemoveAll(p string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.removed = append(f.removed, p)
-	return nil
 }
 
 func (f *fakeAWS) activeDefs() []string {

@@ -71,14 +71,6 @@ func (rootDirs) RemoveAll(path string) error { return os.RemoveAll(path) }
 // dependency, with room for the image pull.
 const fargateMaxWait = 110 * time.Second
 
-// defaultHandoffWait is 120 s, or on Fargate the most its start timeout leaves room for.
-func defaultHandoffWait(launcher string) int {
-	if launcher == "fargate" {
-		return int(fargateMaxWait / time.Second)
-	}
-	return 120
-}
-
 func newFargate(ctx context.Context, sc sandboxConfig) (backend, error) {
 	if sc.handoffWait > fargateMaxWait {
 		return nil, fmt.Errorf("AGENTD_HANDOFF_WAIT_SECONDS is %s; on Fargate it must be at most %s", sc.handoffWait, fargateMaxWait)

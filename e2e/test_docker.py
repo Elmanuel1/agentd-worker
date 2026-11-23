@@ -1,5 +1,6 @@
 """Sessions whose tools run in sandboxes the controller launches with the Docker adapter."""
 
+import contextlib
 import os
 import subprocess
 import time
@@ -64,12 +65,26 @@ def test_a_killed_worker_is_answered_with_an_error_and_the_next_call_runs(client
     assert "after-kill" in text(second) and not second.is_error
 
 
+@contextlib.contextmanager
+def handoff_held():
+    """Refuses sandboxes' connections to the controller's handoff port while open, so a kill
+    inside it always lands before the item is collected."""
+    host, port = os.environ["AGENTD_HANDOFF_ADDR"].rsplit(":", 1)
+    rule = ["INPUT", "-d", host, "-p", "tcp", "--dport", port, "-j", "REJECT", "--reject-with", "tcp-reset"]
+    subprocess.run(["sudo", "iptables", "-I", *rule], check=True)
+    try:
+        yield
+    finally:
+        subprocess.run(["sudo", "iptables", "-D", *rule], check=True)
+
+
 def test_a_controller_killed_mid_handoff_ends_with_one_sandbox(client, environment) -> None:
     _, controller = environment
-    session = start(client, environment, "e2e-restart")
-    wait("the sandbox to launch", lambda: containers(session.id, "label=agentd.role=fetch"), timeout=60)
-    controller.kill()
-    controller.start()
+    with handoff_held():
+        session = start(client, environment, "e2e-restart")
+        wait("the sandbox to launch", lambda: containers(session.id, "label=agentd.role=fetch", "status=running"), timeout=60)
+        controller.kill()
+        controller.start()
     seen = wait("the turn to end", lambda: finished(client, session), timeout=int(os.environ.get("AGENTD_E2E_RESTART_WAIT", "300")))
     assert "restarted" in text(results(seen)[0])
     assert len(containers(session.id)) == 3, "exactly one sandbox"

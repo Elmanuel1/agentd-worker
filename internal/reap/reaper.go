@@ -19,6 +19,11 @@ type Config struct {
 	StaleAfter time.Duration
 }
 
+// lookback is how far before a start its first pass answers stopped items. A start keeps no record
+// of earlier passes, so a failed answer is retried after a restart within this, and the first pass
+// reads no event log of an item stopped longer ago.
+const lookback = 24 * time.Hour
+
 // Reaper runs passes over the environment's items. It is not safe for concurrent passes.
 type Reaper struct {
 	cfg      Config
@@ -43,12 +48,11 @@ func New(cfg Config, items Items, events Events, meter metric.Meter, log *slog.L
 	}
 	return &Reaper{
 		cfg: cfg, items: items, events: events, log: log, reaped: reaped, results: results,
-		retry: map[ids.SessionID]bool{},
+		lastPass: time.Now().Add(-lookback), retry: map[ids.SessionID]bool{},
 	}, nil
 }
 
-// Run passes at once and then every Interval until ctx ends. A start holds no record of earlier
-// passes, so the first answers every stopped item; one already answered owes nothing.
+// Run passes at once and then every Interval until ctx ends.
 func (r *Reaper) Run(ctx context.Context) error {
 	ticker := time.NewTicker(r.cfg.Interval)
 	defer ticker.Stop()

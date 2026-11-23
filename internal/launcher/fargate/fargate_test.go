@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -63,7 +64,7 @@ func TestLaunchAndRelease(t *testing.T) {
 	}
 	run := f.runs[2]
 	env := run.Overrides.ContainerOverrides[0]
-	if aws.ToString(run.StartedBy) != "sesn_1" || !strings.HasPrefix(aws.ToString(run.TaskDefinition), "arn:aws:ecs:r:1:task-definition/agentd-sesn_1:") || aws.ToString(run.ClientToken) != "n3" || aws.ToString(env.Name) != "fetch" || aws.ToString(env.Environment[0].Value) != "n3" {
+	if aws.ToString(run.StartedBy) != "sesn_1" || !strings.HasPrefix(aws.ToString(run.TaskDefinition), "arn:aws:ecs:r:1:task-definition/agentd-sandbox-sesn_1:") || aws.ToString(run.ClientToken) != "n3" || aws.ToString(env.Name) != "fetch" || aws.ToString(env.Environment[0].Value) != "n3" {
 		t.Errorf("RunTask %+v", run)
 	}
 	if err := l.Release(ctx, "sesn_1"); err != nil {
@@ -111,13 +112,11 @@ func TestReleaseFinishesOnRetry(t *testing.T) {
 // the task's containers shut down.
 type lagging struct {
 	*fakeAWS
-	seen  map[string]bool
-	reads int
+	seen map[string]bool
 }
 
 func (f *lagging) DescribeTasks(ctx context.Context, in *ecs.DescribeTasksInput, _ ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error) {
 	out, err := f.fakeAWS.DescribeTasks(ctx, in)
-	f.reads++
 	for i, t := range out.Tasks {
 		if arn := aws.ToString(t.TaskArn); aws.ToString(t.LastStatus) == "STOPPED" && !f.seen[arn] {
 			f.seen[arn] = true
@@ -127,24 +126,31 @@ func (f *lagging) DescribeTasks(ctx context.Context, in *ecs.DescribeTasksInput,
 	return out, err
 }
 
-// TestStopWaitsUntilStopped holds that Stop returns once the task has stopped, not when ECS takes
-// the stop, so a next Launch never shares the workspace with a worker still shutting down; and
-// that a task ECS no longer returns counts as stopped.
+// TestStopWaitsUntilStopped holds that Stop returns once the session's tasks have stopped, not when
+// ECS takes the stop, so a next Launch never shares the workspace with a worker still shutting
+// down; after a controller restart too, for a task told to stop before it.
 func TestStopWaitsUntilStopped(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := &lagging{fakeAWS: newFake(), seen: map[string]bool{}}
 		l := New(f, f, f, cfg)
-		if err := l.Launch(t.Context(), "sesn_1", "n1"); err != nil {
+		for _, n := range []ids.Nonce{"n1", "n2"} {
+			if err := l.Launch(t.Context(), "sesn_1", n); err != nil {
+				t.Fatal(err)
+			}
+		}
+		start := time.Now()
+		if err := l.Stop(t.Context(), "sesn_1"); err != nil || time.Since(start) != 5*time.Second {
+			t.Errorf("Stop: %v after %s, want a deactivating read and a stopped one 5 s later", err, time.Since(start))
+		}
+		if err := l.Launch(t.Context(), "sesn_1", "n3"); err != nil {
 			t.Fatal(err)
 		}
-		f.reads = 0
-		start := time.Now()
-		if err := l.Stop(t.Context(), "sesn_1"); err != nil || f.reads != 3 || time.Since(start) != 5*time.Second {
-			t.Errorf("Stop: %v after %d reads and %s, want the list, a deactivating read and a stopped one 5 s later", err, f.reads, time.Since(start))
+		for _, arn := range slices.Collect(maps.Keys(f.tasks)) {
+			f.StopTask(t.Context(), &ecs.StopTaskInput{Task: aws.String(arn)})
 		}
-		l.tasks["sesn_1"] = "arn:aws:ecs:r:1:task/c/gone"
-		if err := l.Stop(t.Context(), "sesn_1"); err != nil || l.tasks["sesn_1"] != "" {
-			t.Errorf("Stop of a task ECS no longer holds: %v, known %q", err, l.tasks["sesn_1"])
+		start = time.Now()
+		if err := New(f, f, f, cfg).Stop(t.Context(), "sesn_1"); err != nil || time.Since(start) != 5*time.Second {
+			t.Errorf("Stop after a restart: %v after %s, want it to wait for the task told to stop", err, time.Since(start))
 		}
 	})
 }
