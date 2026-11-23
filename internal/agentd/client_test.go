@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -171,8 +172,8 @@ func TestListAndSend(t *testing.T) {
 	if items[1] != want {
 		t.Errorf("item %+v, want %+v", items[1], want)
 	}
-	if q := f.query["GET /v1/environments/env_1/work"]; !strings.Contains(q, "page=p1") || !strings.Contains(q, "limit=100") {
-		t.Errorf("list query %q", q)
+	if q, err := url.ParseQuery(f.query["GET /v1/environments/env_1/work"]); err != nil || q.Get("page") != "p1" || q.Get("limit") != "100" {
+		t.Errorf("list query %v, %v; want page p1 and agentd's largest page, 100", q, err)
 	}
 	if err := c.Events().Send(t.Context(), "sesn_1", []string{"tu_1", "tu_2"}); err != nil {
 		t.Fatal(err)

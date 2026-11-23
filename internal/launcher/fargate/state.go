@@ -92,10 +92,9 @@ func addressOf(tasks []ecstypes.Task, err error) (netip.Addr, bool, error) {
 // after it, and room for ECS to deprovision.
 const stopWait = 3 * time.Minute
 
-// missingGrace is how long after its launch Stop waits on a task ECS does not return. ECS is
-// eventually consistent just after RunTask, and drops a task an hour after it stops; past this, a
-// task it does not return is gone.
-const missingGrace = 30 * time.Second
+// taskRetention is how long ECS keeps returning a task after it stops. A task launched less than
+// this long ago that ECS does not return is not yet consistent, not gone, so Stop waits on it.
+const taskRetention = time.Hour
 
 // Stop stops the session's tasks and returns once each has stopped, so no later task shares the
 // workspace with one still shutting down. ListTasks is eventually consistent, so the task the last
@@ -150,7 +149,7 @@ func (l *Launcher) Stop(ctx context.Context, session ids.SessionID) error {
 		if err != nil {
 			return err
 		}
-		missing := known.arn != "" && time.Since(known.at) < missingGrace &&
+		missing := known.arn != "" && time.Since(known.at) < taskRetention &&
 			!slices.ContainsFunc(tasks, func(t ecstypes.Task) bool { return aws.ToString(t.TaskArn) == known.arn })
 		if !missing && !slices.ContainsFunc(append(tasks, told...), func(t ecstypes.Task) bool { return aws.ToString(t.LastStatus) != lastStopped }) {
 			break

@@ -123,8 +123,8 @@ func (refusing) StopTask(context.Context, *ecs.StopTaskInput, ...func(*ecs.Optio
 }
 
 // TestStopsATaskNotYetListed holds FG-3 while ECS lags: the task the last Launch ran is stopped by
-// its ARN and waited for, one DescribeTasks does not return yet is waited for, and Stop forgets
-// it only once it has stopped or ECS has dropped it.
+// its ARN and waited for, one DescribeTasks does not return yet is waited for until it does or the
+// stop times out, and Stop forgets it only once it has stopped or ECS can have dropped it.
 func TestStopsATaskNotYetListed(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -139,8 +139,8 @@ func TestStopsATaskNotYetListed(t *testing.T) {
 		{"a task the list lags behind is stopped and waited for", func(f *lagging) ECS { return unlisted{f} }, false, 0, false, 5 * time.Second, 0},
 		{"a refused stop keeps the task for the retry", func(f *lagging) ECS { return refusing{unlisted{f}} }, true, 1, true, 0, 0},
 		{"a task ECS does not return yet is stopped once it does", func(f *lagging) ECS { return &hidden{unlisted{f}, 1} }, false, 0, false, 10 * time.Second, 0},
-		{"a task ECS does not return just after its launch is waited for", func(f *lagging) ECS { return &hidden{unlisted{f}, -1} }, false, 1, false, missingGrace, 0},
-		{"a task ECS dropped long after its launch is gone at once", func(f *lagging) ECS { return &hidden{unlisted{f}, -1} }, false, 1, false, 0, time.Hour},
+		{"a task launched within ECS's retention is never taken for gone", func(f *lagging) ECS { return &hidden{unlisted{f}, -1} }, true, 1, true, stopWait, 0},
+		{"a task ECS dropped after its retention is gone at once", func(f *lagging) ECS { return &hidden{unlisted{f}, -1} }, false, 1, false, 0, 2 * taskRetention},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

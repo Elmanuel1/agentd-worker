@@ -80,28 +80,36 @@ func newReaper(t *testing.T, f *fakeAgentd) *Reaper {
 	return r
 }
 
-// TestPass holds RP-1, RP-2 and RP-5.
+// TestPass holds RP-1, RP-2 and RP-5; a stale item owes no replacement worker's calls.
 func TestPass(t *testing.T) {
 	now := time.Now()
 	cases := []struct {
 		name string
 		item Item
 		stop error
+		// log is the session's events, owes when nil.
+		log  []Event
 		want []string
 	}{
-		{"stale is stopped before it is answered (RP-1)", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, nil, []string{"stop w", "send s [tu_2 tu_3]"}},
-		{"stale starting item by its ack", Item{Work: "w", Session: "s", State: StateStarting, Beat: now.Add(-7 * time.Minute)}, nil, []string{"stop w", "send s [tu_2 tu_3]"}},
-		{"beating item is left alone", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-time.Minute)}, nil, nil},
-		{"unacked item is left to reclaim", Item{Work: "w", Session: "s", State: StateStarting}, nil, nil},
-		{"recently stopped is answered (RP-2)", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-30 * time.Second)}, nil, []string{"send s [tu_2 tu_3]"}},
-		{"stopped within an interval before the last pass, by a lagging clock, is answered", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-90 * time.Second)}, nil, []string{"send s [tu_2 tu_3]"}},
-		{"stopped an interval before the last pass is left", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-2 * time.Minute)}, nil, nil},
-		{"a stopping item whose worker died is stopped", Item{Work: "w", Session: "s", State: StateStopping, Beat: now.Add(-7 * time.Minute)}, nil, []string{"stop w", "send s [tu_2 tu_3]"}},
-		{"a failed stop answers nothing", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, errors.New("503"), []string{"stop w"}},
+		{"stale is stopped before it is answered (RP-1)", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, nil, nil, []string{"stop w", "send s [tu_2 tu_3]"}},
+		{"stale starting item by its ack", Item{Work: "w", Session: "s", State: StateStarting, Beat: now.Add(-7 * time.Minute)}, nil, nil, []string{"stop w", "send s [tu_2 tu_3]"}},
+		{"beating item is left alone", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-time.Minute)}, nil, nil, nil},
+		{"unacked item is left to reclaim", Item{Work: "w", Session: "s", State: StateStarting}, nil, nil, nil},
+		{"recently stopped is answered (RP-2)", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-30 * time.Second)}, nil, nil, []string{"send s [tu_2 tu_3]"}},
+		{"stopped within an interval before the last pass, by a lagging clock, is answered", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-90 * time.Second)}, nil, nil, []string{"send s [tu_2 tu_3]"}},
+		{"stopped an interval before the last pass is left", Item{Work: "w", Session: "s", State: StateStopped, StoppedAt: now.Add(-2 * time.Minute)}, nil, nil, nil},
+		{"a stopping item whose worker died is stopped", Item{Work: "w", Session: "s", State: StateStopping, Beat: now.Add(-7 * time.Minute)}, nil, nil, []string{"stop w", "send s [tu_2 tu_3]"}},
+		{"a stale item owes only calls made by this pass's stop of it", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, nil,
+			[]Event{{Type: ToolUse, ID: "dead", At: now.Add(-time.Minute)}, {Type: ToolUse, ID: "live", At: now.Add(time.Second)}}, []string{"stop w", "send s [dead]"}},
+		{"a failed stop answers nothing", Item{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}, errors.New("503"), nil, []string{"stop w"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			f := &fakeAgentd{items: []Item{c.item}, events: map[ids.SessionID][]Event{"s": owes}, stopErr: map[ids.WorkID]error{"w": c.stop}}
+			log := c.log
+			if log == nil {
+				log = owes
+			}
+			f := &fakeAgentd{items: []Item{c.item}, events: map[ids.SessionID][]Event{"s": log}, stopErr: map[ids.WorkID]error{"w": c.stop}}
 			r := newReaper(t, f)
 			r.lastPass = now.Add(-time.Minute)
 			r.passAt(t.Context(), now)
@@ -109,18 +117,6 @@ func TestPass(t *testing.T) {
 				t.Errorf("calls %v, want %v", f.calls, c.want)
 			}
 		})
-	}
-}
-
-// TestStaleOwesOnlyCallsBeforeItsStop holds RP-1 with a replacement worker already running: a call
-// made after this pass's stop is the replacement's, and still live.
-func TestStaleOwesOnlyCallsBeforeItsStop(t *testing.T) {
-	now := time.Now()
-	log := []Event{{Type: ToolUse, ID: "dead", At: now.Add(-time.Minute)}, {Type: ToolUse, ID: "live", At: now.Add(time.Second)}}
-	f := &fakeAgentd{items: []Item{{Work: "w", Session: "s", State: StateActive, Beat: now.Add(-7 * time.Minute)}}, events: map[ids.SessionID][]Event{"s": log}}
-	newReaper(t, f).passAt(t.Context(), now)
-	if want := []string{"stop w", "send s [dead]"}; !slices.Equal(f.calls, want) {
-		t.Errorf("calls %v, want %v", f.calls, want)
 	}
 }
 
