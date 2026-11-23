@@ -137,7 +137,7 @@ func TestRelaunchUnderOneNonce(t *testing.T) {
 				if c.restart {
 					l = open(t, c.ecs(f), f, cfg)
 				}
-				if err := l.Launch(t.Context(), "sesn_1", "n1"); (err != nil) != c.failed {
+				if err := l.Launch(t.Context(), "sesn_1", "n1"); errors.Is(err, errNonceStopped) != c.failed {
 					t.Errorf("repeated launch: %v", err)
 				}
 			})

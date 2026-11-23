@@ -5,6 +5,7 @@ package fargate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -89,6 +90,9 @@ type launched struct {
 // so not returning it is lag, not a task gone.
 func (k launched) settling() bool { return time.Since(k.at) < taskRetention }
 
+// errNonceStopped means a Launch repeated a nonce whose task has stopped, which ECS would only replay.
+var errNonceStopped = errors.New("its nonce already ran a task, which stopped")
+
 // MaxHandoffWait keeps the handoff wait inside the start timeout a Fargate container waits for its
 // dependency, with room for the image pull.
 const MaxHandoffWait = startTimeout - 10*time.Second
@@ -122,7 +126,7 @@ func (l *Launcher) Launch(ctx context.Context, session ids.SessionID, nonce ids.
 	known := l.tasks[session]
 	l.mu.Unlock()
 	if known.arn != "" && known.nonce == nonce {
-		return l.relaunched(ctx, session, known)
+		return l.relaunched(ctx, known)
 	}
 	if err := l.Stop(ctx, session); err != nil {
 		return err
@@ -158,7 +162,7 @@ func (l *Launcher) Launch(ctx context.Context, session ids.SessionID, nonce ids.
 	// An SDK retry under the nonce gets ECS's replay of the first answer, whose task may since
 	// have stopped.
 	if aws.ToString(out.Tasks[0].DesiredStatus) != string(ecstypes.DesiredStatusRunning) {
-		return fmt.Errorf("launching session %s: its nonce already ran a task, which stopped", session)
+		return errNonceStopped
 	}
 	l.mu.Lock()
 	l.tasks[session] = launched{arn: aws.ToString(out.Tasks[0].TaskArn), at: time.Now(), nonce: nonce}
@@ -168,7 +172,7 @@ func (l *Launcher) Launch(ctx context.Context, session ids.SessionID, nonce ids.
 
 // relaunched answers a Launch repeating the nonce of the task it ran: that task still running, or
 // one ECS does not return yet so soon after its launch, is this launch; one stopped is an error.
-func (l *Launcher) relaunched(ctx context.Context, session ids.SessionID, known launched) error {
+func (l *Launcher) relaunched(ctx context.Context, known launched) error {
 	tasks, err := l.describeTasks(ctx, []string{known.arn})
 	running := slices.ContainsFunc(tasks, func(t ecstypes.Task) bool {
 		return aws.ToString(t.DesiredStatus) == string(ecstypes.DesiredStatusRunning)
@@ -176,5 +180,5 @@ func (l *Launcher) relaunched(ctx context.Context, session ids.SessionID, known 
 	if err != nil || running || (len(tasks) == 0 && known.settling()) {
 		return err
 	}
-	return fmt.Errorf("launching session %s: its nonce already ran a task, which stopped", session)
+	return errNonceStopped
 }
