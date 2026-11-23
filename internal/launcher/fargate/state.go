@@ -100,13 +100,15 @@ func (l *Launcher) Stop(ctx context.Context, session ids.SessionID) error {
 	if err != nil {
 		return err
 	}
+	var launchedARN []string
 	if known != "" {
-		launched, err := l.describeTasks(ctx, []string{known})
-		if err != nil {
-			return err
-		}
-		tasks = append(tasks, launched...)
+		launchedARN = []string{known}
 	}
+	launched, err := l.describeTasks(ctx, launchedARN)
+	if err != nil {
+		return err
+	}
+	tasks = append(tasks, launched...)
 	var arns []string
 	var errs []error
 	for _, t := range tasks {
