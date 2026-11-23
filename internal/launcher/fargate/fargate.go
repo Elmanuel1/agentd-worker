@@ -155,6 +155,11 @@ func (l *Launcher) Launch(ctx context.Context, session ids.SessionID, nonce ids.
 	if len(out.Failures) > 0 || len(out.Tasks) == 0 {
 		return fmt.Errorf("running the task: %v", out.Failures)
 	}
+	// An SDK retry under the nonce gets ECS's replay of the first answer, whose task may since
+	// have stopped.
+	if aws.ToString(out.Tasks[0].DesiredStatus) != string(ecstypes.DesiredStatusRunning) {
+		return fmt.Errorf("launching session %s: its nonce already ran a task, which stopped", session)
+	}
 	l.mu.Lock()
 	l.tasks[session] = launched{arn: aws.ToString(out.Tasks[0].TaskArn), at: time.Now(), nonce: nonce}
 	l.mu.Unlock()

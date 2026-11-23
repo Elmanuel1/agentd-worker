@@ -104,8 +104,8 @@ func TestLaunchAndRelease(t *testing.T) {
 }
 
 // TestRelaunchUnderOneNonce holds FG-1's repeated Launch: it keeps a task ECS does not return yet,
-// as Stop does, and fails when the nonce's task stopped, or ECS dropped it past its retention,
-// since ECS would only replay it.
+// as Stop does, and fails when the nonce's task stopped, or ECS dropped it past its retention, or
+// ECS's replay of it answers, since ECS would only replay it.
 func TestRelaunchUnderOneNonce(t *testing.T) {
 	hide := func(f *fakeAWS) ECS { return &hidden{unlisted{&lagging{fakeAWS: f, seen: map[string]bool{}}}, -1} }
 	cases := []struct {
@@ -113,11 +113,14 @@ func TestRelaunchUnderOneNonce(t *testing.T) {
 		ecs     func(*fakeAWS) ECS
 		stopped bool
 		later   time.Duration
+		// restart relaunches from a launcher with no record of the first, so ECS's replay answers.
+		restart bool
 		failed  bool
 	}{
-		{"a task ECS does not return yet is this launch", hide, false, 0, false},
-		{"a task ECS dropped past its retention cannot run again", hide, true, 2 * taskRetention, true},
-		{"a stopped task cannot run again", func(f *fakeAWS) ECS { return f }, true, 0, true},
+		{"a task ECS does not return yet is this launch", hide, false, 0, false, false},
+		{"a task ECS dropped past its retention cannot run again", hide, true, 2 * taskRetention, false, true},
+		{"a stopped task cannot run again", func(f *fakeAWS) ECS { return f }, true, 0, false, true},
+		{"a replay of a stopped task is no launch", func(f *fakeAWS) ECS { return f }, true, 0, true, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -131,6 +134,9 @@ func TestRelaunchUnderOneNonce(t *testing.T) {
 					f.StopTask(t.Context(), &ecs.StopTaskInput{Task: aws.String(l.tasks["sesn_1"].arn)})
 				}
 				time.Sleep(c.later)
+				if c.restart {
+					l = open(t, c.ecs(f), f, cfg)
+				}
 				if err := l.Launch(t.Context(), "sesn_1", "n1"); (err != nil) != c.failed {
 					t.Errorf("repeated launch: %v", err)
 				}

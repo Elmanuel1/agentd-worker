@@ -12,6 +12,9 @@ has these methods, returned as a concrete type from its constructor:
 | `Launcher` | `Release(ctx, session)` | Stop the sandbox and delete everything the backend keeps for the session. |
 | `Locator` | `Address(ctx, session)` | The running sandbox's address, which the controller compares with the caller of `GET /work-item`. |
 
+The controller also calls `Close()` on shutdown, which releases what the adapter opened, such as
+an engine client or a file system root; it may do nothing.
+
 Every call is safe to repeat and safe on a session the backend has never seen. A sandbox holds no
 environment or runtime key, no host path, no host namespace, no added capability and no cloud
 credential that grants anything. The one host path is Docker's under `runsc`: a read-only
